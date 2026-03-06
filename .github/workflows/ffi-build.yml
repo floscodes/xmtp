@@ -86,7 +86,7 @@ jobs:
           Copy-Item xmtp-ffi\include\xmtp_ffi.h dist\
           Compress-Archive -Path dist\* -DestinationPath "xmtp-ffi-${{ matrix.target }}.zip"
 
-      - uses: actions/upload-artifact@v6
+      - uses: actions/upload-artifact@v7
         with:
           name: xmtp-ffi-${{ matrix.target }}
           path: xmtp-ffi-${{ matrix.target }}.*
