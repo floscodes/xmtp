@@ -34,6 +34,11 @@ mod ens;
 
 // Re-export core public API at crate root.
 pub use client::{Client, ClientBuilder};
+// Re-export standalone functions.
+pub use client::{
+    generate_inbox_id, get_inbox_id_for_identifier, init_logger, is_address_authorized,
+    is_installation_authorized, libxmtp_version, verify_signed_with_public_key,
+};
 pub use conversation::{Conversation, GroupMember, Message};
 #[cfg(feature = "ens")]
 pub use ens::{DEFAULT_RPC, EnsResolver};
@@ -52,10 +57,4 @@ pub use types::{
     LastReadTime, ListConversationsOptions, ListMessagesOptions, MembershipState, MessageKind,
     MetadataField, PermissionLevel, PermissionPolicy, PermissionPolicySet, PermissionUpdateType,
     Permissions, SendOptions, Signer, SortDirection, SyncResult,
-};
-
-// Re-export standalone functions.
-pub use client::{
-    generate_inbox_id, get_inbox_id_for_identifier, init_logger, is_address_authorized,
-    is_installation_authorized, libxmtp_version, verify_signed_with_public_key,
 };

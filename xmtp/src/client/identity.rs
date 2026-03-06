@@ -3,11 +3,10 @@
 
 use std::ptr;
 
+use super::{Client, apply_signature_request, sign_request};
 use crate::error::{self, Result};
 use crate::ffi::{OwnedHandle, to_c_string};
 use crate::types::{AccountIdentifier, Signer};
-
-use super::{Client, apply_signature_request, sign_request};
 
 impl Client {
     /// Add a new identifier to this inbox. Requires signing with both the

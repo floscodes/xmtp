@@ -3,6 +3,7 @@
 
 use std::ptr;
 
+use super::Client;
 use crate::conversation::{
     Conversation, Message, read_conversation_list_inner, read_enriched_message_list,
     read_hmac_key_map,
@@ -16,8 +17,6 @@ use crate::types::{
     AccountIdentifier, ConsentState, ConversationType, CreateDmOptions, CreateGroupOptions,
     HmacKeyEntry, IdentifierKind, ListConversationsOptions, SyncResult,
 };
-
-use super::Client;
 
 impl Client {
     /// Create a group with any recipient types.

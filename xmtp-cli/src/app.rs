@@ -5,12 +5,11 @@
 //! [`Event`] variants and are applied via [`App::apply`].
 
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-
+use xmtp::PermissionPolicy;
 use xmtp::content::Content;
 use xmtp::{ConsentState, DeliveryStatus, Message, MessageKind};
 
 use crate::event::{Cmd, CmdTx, ConvEntry, Event, GroupField, MemberEntry, PermissionRow};
-use xmtp::PermissionPolicy;
 
 /// Active sidebar tab.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

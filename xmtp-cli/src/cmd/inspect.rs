@@ -1,8 +1,7 @@
 //! Identity inspection commands: info (merged with installations), revoke.
 
-use crate::app::truncate_id;
-
 use super::config::{self, SignerKind, env_name};
+use crate::app::truncate_id;
 
 /// Show profile information and all installations.
 ///

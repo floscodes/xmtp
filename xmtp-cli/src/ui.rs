@@ -8,12 +8,11 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap};
 use unicode_width::UnicodeWidthStr;
-
+use xmtp::PermissionPolicy;
 use xmtp::{MessageKind, PermissionLevel};
 
 use crate::app::{App, Focus, Mode, Prompt, Tab, decode_body, delivery_icon, truncate_id};
 use crate::event::GroupField;
-use xmtp::PermissionPolicy;
 
 /// Muted lavender accent — gentle, never harsh.
 const ACCENT: Color = Color::Rgb(180, 160, 220);
