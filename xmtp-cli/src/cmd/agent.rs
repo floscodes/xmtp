@@ -6,13 +6,13 @@
 use std::io::{self, Write};
 
 use serde_json::{Value, json};
-use xmtp::content::Content;
 use xmtp::{
     ConsentState, ConversationOrderBy, ConversationType, CreateGroupOptions, DeliveryStatus,
     ListConversationsOptions, ListMessagesOptions, MessageKind, Recipient, SortDirection, stream,
 };
 
 use super::config;
+use crate::decode;
 
 enum StreamEvent {
     Message {
@@ -67,66 +67,6 @@ fn parse_consent(s: &str) -> Option<ConsentState> {
     }
 }
 
-/// Extract plain text from a message for human-readable display.
-fn decode_text(msg: &xmtp::Message) -> String {
-    if msg.kind != MessageKind::Application {
-        return String::new();
-    }
-    match msg.decode() {
-        Ok(Content::Text(s) | Content::Markdown(s)) => s,
-        Ok(Content::Reaction(r)) => r.content,
-        Ok(Content::Reply(r)) => inner_text(&r.content),
-        _ => String::new(),
-    }
-}
-
-/// Extract text from an inner `EncodedContent` (e.g. reply body).
-fn inner_text(ec: &xmtp::content::EncodedContent) -> String {
-    let type_id = ec.r#type.as_ref().map(|t| t.type_id.as_str());
-    match type_id {
-        Some("text" | "markdown") => String::from_utf8(ec.content.clone()).unwrap_or_default(),
-        _ => ec.fallback.clone().unwrap_or_default(),
-    }
-}
-
-/// Build a JSON representation of message content.
-fn content_json(msg: &xmtp::Message) -> Value {
-    if msg.kind != MessageKind::Application {
-        return json!({"type": "system"});
-    }
-    match msg.decode() {
-        Ok(Content::Text(s)) => json!({"type": "text", "text": s}),
-        Ok(Content::Markdown(s)) => json!({"type": "markdown", "text": s}),
-        Ok(Content::Reaction(r)) => json!({
-            "type": "reaction",
-            "emoji": r.content,
-            "reference_message_id": r.reference,
-        }),
-        Ok(Content::Reply(r)) => json!({
-            "type": "reply",
-            "reference_message_id": r.reference,
-            "text": inner_text(&r.content),
-        }),
-        Ok(Content::ReadReceipt) => json!({"type": "read_receipt"}),
-        Ok(Content::Attachment(a)) => json!({
-            "type": "attachment",
-            "filename": a.filename,
-            "mime_type": a.mime_type,
-            "size": a.data.len(),
-        }),
-        Ok(Content::RemoteAttachment(a)) => json!({
-            "type": "remote_attachment",
-            "url": a.url,
-            "filename": a.filename,
-        }),
-        Ok(Content::Unknown { content_type, .. }) => json!({
-            "type": "unknown",
-            "content_type": content_type,
-        }),
-        Err(e) => json!({"type": "error", "error": e.to_string()}),
-    }
-}
-
 /// `xmtp conversations [--consent STATE] [--json]`
 pub fn conversations(profile: &str, consent: Option<&str>, json: bool) -> xmtp::Result<()> {
     let (_, client) = config::open_client(profile)?;
@@ -161,7 +101,7 @@ pub fn conversations(profile: &str, consent: Option<&str>, json: bool) -> xmtp::
                     "id": c.id(),
                     "type": conv_type_str(c.conversation_type()),
                     "name": c.name(),
-                    "last_message": last.as_ref().map(decode_text),
+                    "last_message": last.as_ref().map(decode::text),
                     "last_message_ns": last.as_ref().map(|m| m.sent_at_ns),
                 })
             })
@@ -216,7 +156,7 @@ pub fn messages(
                     "sender_inbox_id": m.sender_inbox_id,
                     "sent_at_ns": m.sent_at_ns,
                     "delivery_status": delivery_status_str(m.delivery_status),
-                    "content": content_json(m),
+                    "content": decode::content_json(m),
                 })
             })
             .collect();
@@ -230,7 +170,7 @@ pub fn messages(
             if m.kind != MessageKind::Application {
                 continue;
             }
-            let text = decode_text(m);
+            let text = decode::text(m);
             let sender = &m.sender_inbox_id;
             let status = delivery_status_str(m.delivery_status);
             println!("  [{status}] {sender}: {text}");
@@ -471,7 +411,7 @@ pub fn stream_events(profile: &str, kind: &str) -> xmtp::Result<()> {
                         "sender_inbox_id": msg.sender_inbox_id,
                         "sent_at_ns": msg.sent_at_ns,
                         "delivery_status": delivery_status_str(msg.delivery_status),
-                        "content": content_json(&msg),
+                        "content": decode::content_json(&msg),
                     }));
                 }
             }

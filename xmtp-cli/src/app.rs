@@ -5,9 +5,7 @@
 //! [`Event`] variants and are applied via [`App::apply`].
 
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use xmtp::PermissionPolicy;
-use xmtp::content::Content;
-use xmtp::{ConsentState, DeliveryStatus, Message, MessageKind};
+use xmtp::{ConsentState, Message, PermissionPolicy};
 
 use crate::event::{Cmd, CmdTx, ConvEntry, Event, GroupField, MemberEntry, PermissionRow};
 
@@ -311,15 +309,15 @@ impl App {
             KeyCode::Char('x') if self.tab == Tab::Inbox || self.tab == Tab::Requests => {
                 if let Some(e) = self.sidebar().get(self.sidebar_idx) {
                     let id = e.id.clone();
-                    self.cmd(Cmd::SetConsent {
-                        id: id.clone(),
-                        state: ConsentState::Denied,
-                    });
                     if self.tab == Tab::Inbox && self.active_id.as_deref() == Some(&id) {
                         self.active_id = None;
                         self.messages.clear();
                         self.scroll = 0;
                     }
+                    self.cmd(Cmd::SetConsent {
+                        id,
+                        state: ConsentState::Denied,
+                    });
                 }
             }
             // Consent: undo (Hidden → Unknown).
@@ -723,80 +721,4 @@ const fn next_policy(p: PermissionPolicy) -> PermissionPolicy {
 /// Char-index to byte-index in a UTF-8 string.
 fn byte_offset(s: &str, char_idx: usize) -> usize {
     s.char_indices().nth(char_idx).map_or(s.len(), |(i, _)| i)
-}
-
-/// Decode a message to a short preview string for the sidebar.
-pub fn decode_preview(msg: &Message) -> String {
-    if msg.kind != MessageKind::Application {
-        return String::new();
-    }
-    match msg.decode() {
-        Ok(Content::Text(s) | Content::Markdown(s)) => truncate(&s, 28),
-        Ok(Content::Reaction(r)) => truncate(&r.content, 28),
-        Ok(Content::ReadReceipt) => String::new(),
-        Ok(Content::Reply(r)) => truncate(&reply_text(&r.content), 28),
-        Ok(Content::Attachment(a)) => {
-            format!(
-                "[file: {}]",
-                truncate(a.filename.as_deref().unwrap_or("file"), 20)
-            )
-        }
-        Ok(Content::RemoteAttachment(_)) => "[attachment]".into(),
-        Ok(Content::Unknown { .. }) | Err(_) => msg.fallback.clone().unwrap_or_default(),
-    }
-}
-
-/// Decode full message body for the chat view.
-pub fn decode_body(msg: &Message) -> String {
-    match msg.decode() {
-        Ok(Content::Text(s) | Content::Markdown(s)) => s,
-        Ok(Content::Reaction(r)) => format!("[{}]", r.content),
-        Ok(Content::ReadReceipt) => "[read]".into(),
-        Ok(Content::Reply(r)) => reply_text(&r.content),
-        Ok(Content::Attachment(a)) => {
-            format!("[file: {}]", a.filename.as_deref().unwrap_or("file"))
-        }
-        Ok(Content::RemoteAttachment(_)) => "[remote attachment]".into(),
-        Ok(Content::Unknown { content_type, .. }) => format!("[unknown: {content_type}]"),
-        Err(_) => msg.fallback.clone().unwrap_or_default(),
-    }
-}
-
-/// Delivery status indicator.
-pub const fn delivery_icon(status: DeliveryStatus) -> &'static str {
-    match status {
-        DeliveryStatus::Published => "✓",
-        DeliveryStatus::Unpublished => "○",
-        DeliveryStatus::Failed => "✗",
-    }
-}
-
-fn reply_text(ec: &xmtp::content::EncodedContent) -> String {
-    ec.r#type
-        .as_ref()
-        .filter(|t| t.type_id == "text" || t.type_id == "markdown")
-        .map_or_else(
-            || "[reply]".into(),
-            |_| String::from_utf8(ec.content.clone()).unwrap_or_else(|_| "[reply]".into()),
-        )
-}
-
-fn truncate(s: &str, max: usize) -> String {
-    if s.chars().count() <= max {
-        s.to_owned()
-    } else {
-        let mut t: String = s.chars().take(max).collect();
-        t.push('…');
-        t
-    }
-}
-
-/// Truncate an identifier for display (e.g. `0x1a2b…c3d4`).
-pub fn truncate_id(id: &str, max: usize) -> String {
-    if id.len() <= max {
-        id.to_owned()
-    } else {
-        let half = max.saturating_sub(1) / 2;
-        format!("{}…{}", &id[..half], &id[id.len() - half..])
-    }
 }

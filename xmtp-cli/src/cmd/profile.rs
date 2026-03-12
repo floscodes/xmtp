@@ -7,7 +7,7 @@ use xmtp::{AlloySigner, Client, LedgerSigner, Signer};
 
 use super::NewArgs;
 use super::config::{self, ProfileConfig, SignerKind};
-use crate::app::truncate_id;
+use crate::decode;
 
 /// Create a new profile, register with the XMTP network, and save config.
 ///
@@ -133,7 +133,7 @@ pub fn list(json: bool) -> xmtp::Result<()> {
             let addr = if cfg.address.is_empty() {
                 "—".into()
             } else {
-                truncate_id(&cfg.address, 14)
+                decode::truncate_id(&cfg.address, 14)
             };
             println!(
                 "  {name:<16} {addr:<16} [{:<10}] [{}]{star}",

@@ -1,7 +1,7 @@
 //! Identity inspection commands: info (merged with installations), revoke.
 
 use super::config::{self, SignerKind, env_name};
-use crate::app::truncate_id;
+use crate::decode;
 
 /// Show profile information and all installations.
 ///
@@ -64,7 +64,7 @@ pub fn info(profile: &str, json: bool) -> xmtp::Result<()> {
     println!("\nInstallations ({} / 10):\n", ids.len());
     for (i, id) in ids.iter().enumerate() {
         let tag = if *id == current { " ← current" } else { "" };
-        let display = truncate_id(id, 44);
+        let display = decode::truncate_id(id, 44);
         println!("  {}  {display:<44}  active{tag}", i + 1);
     }
     Ok(())

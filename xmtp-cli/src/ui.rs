@@ -11,7 +11,8 @@ use unicode_width::UnicodeWidthStr;
 use xmtp::PermissionPolicy;
 use xmtp::{MessageKind, PermissionLevel};
 
-use crate::app::{App, Focus, Mode, Prompt, Tab, decode_body, delivery_icon, truncate_id};
+use crate::app::{App, Focus, Mode, Prompt, Tab};
+use crate::decode;
 use crate::event::GroupField;
 
 /// Muted lavender accent — gentle, never harsh.
@@ -228,7 +229,7 @@ fn draw_chat(app: &mut App, frame: &mut Frame<'_>, area: Rect) {
             continue;
         }
         let is_me = msg.sender_inbox_id == app.inbox_id;
-        let body = decode_body(msg);
+        let body = decode::body(msg);
         let time = format_relative(msg.sent_at_ns);
 
         let wrapped = wrap_text(&body, max_bubble.saturating_sub(4));
@@ -241,7 +242,7 @@ fn draw_chat(app: &mut App, frame: &mut Frame<'_>, area: Rect) {
         let total_w = box_w + 2;
 
         if is_me {
-            let status = delivery_icon(msg.delivery_status);
+            let status = decode::delivery_icon(msg.delivery_status);
             let header = format!("{time}  {status}");
             let h_width = UnicodeWidthStr::width(header.as_str());
             let h_pad = chat_w.saturating_sub(h_width);
@@ -276,7 +277,7 @@ fn draw_chat(app: &mut App, frame: &mut Frame<'_>, area: Rect) {
                 .address_map
                 .get(&msg.sender_inbox_id)
                 .map_or(msg.sender_inbox_id.as_str(), String::as_str);
-            let sender = truncate_id(sender_raw, 16);
+            let sender = decode::truncate_id(sender_raw, 16);
             lines.push(Line::from(vec![
                 Span::styled(format!("  {sender}"), Style::default().fg(PEER_CLR)),
                 Span::styled(format!("  {time}"), Style::default().fg(DIM)),
@@ -360,7 +361,7 @@ fn draw_input(app: &App, frame: &mut Frame<'_>, area: Rect) {
             let names: Vec<_> = app
                 .group_members
                 .iter()
-                .map(|a| truncate_id(a, 10))
+                .map(|a| decode::truncate_id(a, 10))
                 .collect();
             let tag = if names.is_empty() {
                 String::new()
@@ -520,7 +521,7 @@ fn draw_members(app: &App, frame: &mut Frame<'_>, area: Rect) {
         .members
         .iter()
         .map(|m| {
-            let display = truncate_id(&m.label, 24);
+            let display = decode::truncate_id(&m.label, 24);
             let you = if m.inbox_id == app.inbox_id {
                 " (you)"
             } else {
@@ -543,7 +544,7 @@ fn draw_members(app: &App, frame: &mut Frame<'_>, area: Rect) {
             } else {
                 for addr in &m.addresses {
                     lines.push(Line::from(Span::styled(
-                        format!("    {}", truncate_id(addr, 42)),
+                        format!("    {}", decode::truncate_id(addr, 42)),
                         Style::default().fg(DIM),
                     )));
                 }

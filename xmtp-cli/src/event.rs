@@ -4,7 +4,7 @@
 //! All FFI / network operations run on a dedicated **worker thread**.
 //!
 //! - Stream callbacks → `CmdTx` → Worker (via [`Cmd::StreamMsg`] / [`Cmd::StreamConv`])
-//! - App key handling → `CmdTx` → Worker (via [`Cmd::Send`], [`Cmd::Refresh`], etc.)
+//! - App key handling → `CmdTx` → Worker (via [`Cmd::Send`], [`Cmd::Sync`], etc.)
 //! - Worker results  → `Tx`    → Main thread (via [`Event::Conversations`], [`Event::Messages`], etc.)
 
 use std::sync::mpsc;

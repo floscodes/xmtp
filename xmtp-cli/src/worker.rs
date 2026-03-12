@@ -8,44 +8,36 @@ use std::sync::mpsc;
 
 use xmtp::{
     Client, ConsentState, ConversationOrderBy, ConversationType, CreateGroupOptions,
-    DeliveryStatus, EnsResolver, Env, IdentifierKind, ListConversationsOptions,
-    ListMessagesOptions, Message, Recipient, SortDirection, stream,
+    DeliveryStatus, EnsResolver, ListConversationsOptions, ListMessagesOptions, Message, Recipient,
+    SortDirection, stream,
 };
 
-use crate::app::{decode_preview, truncate_id};
+use crate::cmd::config;
+use crate::decode;
 use crate::event::{
     Cmd, CmdTx, ConvEntry, Event, GroupField, GroupInfo, MemberEntry, PermissionRow, Tx,
 };
 
-/// Run the worker loop. Builds the [`Client`], performs initial sync, then
-/// processes [`Cmd`] and sends [`Event`].
+/// Run the worker loop. Opens the profile's [`Client`], performs initial sync,
+/// then processes [`Cmd`] and sends [`Event`].
 ///
 /// Client construction + sync happen here (on the worker thread) so the TUI
 /// renders immediately without blocking on network setup.
 #[allow(clippy::needless_pass_by_value)]
-pub fn run(
-    rx: mpsc::Receiver<Cmd>,
-    tx: Tx,
-    cmd_tx: CmdTx,
-    env: Env,
-    db_path: String,
-    rpc_url: String,
-    address: String,
-) {
+pub fn run(rx: mpsc::Receiver<Cmd>, tx: Tx, cmd_tx: CmdTx, profile: &str) {
     let _ = tx.send(Event::Flash("Connecting...".into()));
 
-    let client = match connect(env, &db_path, &rpc_url, &address) {
-        Ok(c) => c,
+    let (cfg, client) = match config::open_client(profile) {
+        Ok(r) => r,
         Err(e) => {
             let _ = tx.send(Event::Flash(format!("Fatal: {e}")));
             return;
         }
     };
 
-    let mut w = Worker::new(client, tx, &rpc_url, &cmd_tx, &address);
+    let mut w = Worker::new(client, tx, &cfg.rpc_url, &cmd_tx, &cfg.address);
     w.start_streams(&cmd_tx);
 
-    // Initial sync — catch up on messages received while offline.
     w.flash("Syncing...");
     let _ = w.client.sync_welcomes();
     let _ = w.client.sync_all(&[]);
@@ -54,27 +46,6 @@ pub fn run(
 
     while let Ok(cmd) = rx.recv() {
         w.dispatch(cmd);
-    }
-}
-
-/// Build a connected XMTP client with stale-DB recovery.
-fn connect(env: Env, db_path: &str, rpc_url: &str, address: &str) -> xmtp::Result<Client> {
-    let build = |path: &str| {
-        let mut b = Client::builder().env(env).db_path(path);
-        if let Ok(r) = EnsResolver::new(rpc_url) {
-            b = b.resolver(r);
-        }
-        b.build_existing(address, IdentifierKind::Ethereum)
-    };
-    match build(db_path) {
-        Ok(c) => Ok(c),
-        Err(e) if e.to_string().contains("does not match the stored InboxId") => {
-            for ext in ["", "-shm", "-wal"] {
-                let _ = std::fs::remove_file(format!("{db_path}{ext}"));
-            }
-            build(db_path)
-        }
-        Err(e) => Err(e),
     }
 }
 
@@ -278,7 +249,7 @@ impl Worker {
         let group_name = name.or_else(|| {
             let names: Vec<_> = members
                 .iter()
-                .map(|r| truncate_id(&r.to_string(), 10))
+                .map(|r| decode::truncate_id(&r.to_string(), 10))
                 .collect();
             Some(names.join(", "))
         });
@@ -433,7 +404,7 @@ impl Worker {
         if let Ok(Some(msg)) = self.client.message_by_id(msg_id) {
             let _ = self.tx.send(Event::Preview {
                 conv_id,
-                text: decode_preview(&msg),
+                text: decode::preview(&msg),
                 time_ns: msg.sent_at_ns,
                 unread: !is_active,
             });
@@ -584,12 +555,12 @@ impl Worker {
                 let is_group = conv.conversation_type() == Some(ConversationType::Group);
                 let label = if is_group {
                     conv.name()
-                        .unwrap_or_else(|| format!("Group {}", truncate_id(&id, 8)))
+                        .unwrap_or_else(|| format!("Group {}", decode::truncate_id(&id, 8)))
                 } else {
                     self.dm_peer_label(conv)
                 };
                 let last = conv.last_message().ok().flatten();
-                let preview = last.as_ref().map_or(String::new(), decode_preview);
+                let preview = last.as_ref().map_or(String::new(), decode::preview);
                 let last_ns = last.as_ref().map_or(0, |m| m.sent_at_ns);
                 ConvEntry {
                     id,
@@ -616,7 +587,7 @@ impl Worker {
             );
         }
         conv.dm_peer_inbox_id()
-            .map_or_else(|| "DM".into(), |s| truncate_id(&s, 16))
+            .map_or_else(|| "DM".into(), |s| decode::truncate_id(&s, 16))
     }
 
     /// Resolve a display name for a member identity (**non-blocking**).
@@ -626,18 +597,20 @@ impl Worker {
     /// background resolution, returning the truncated address immediately.
     fn display_name(&mut self, address: Option<&str>, inbox_id: &str) -> String {
         let Some(raw) = address else {
-            return truncate_id(inbox_id, 16);
+            return decode::truncate_id(inbox_id, 16);
         };
         let key = raw.to_lowercase();
         if let Some(cached) = self.ens_cache.get(&key) {
-            return cached.clone().unwrap_or_else(|| truncate_id(raw, 16));
+            return cached
+                .clone()
+                .unwrap_or_else(|| decode::truncate_id(raw, 16));
         }
         // Pre-cache as pending (dedup) and queue for background resolution.
         self.ens_cache.insert(key.clone(), None);
         if let Some(ref tx) = self.ens_tx {
             let _ = tx.send(key);
         }
-        truncate_id(raw, 16)
+        decode::truncate_id(raw, 16)
     }
 
     /// Handle a resolved ENS name from the background thread.
@@ -672,7 +645,7 @@ impl Worker {
                     .iter()
                     .zip(&results)
                     .filter(|&(_, ok)| !*ok)
-                    .map(|(r, _)| truncate_id(&r.to_string(), 12))
+                    .map(|(r, _)| decode::truncate_id(&r.to_string(), 12))
                     .collect();
                 if bad.is_empty() {
                     true
