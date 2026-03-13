@@ -121,14 +121,17 @@ pub unsafe extern "C" fn xmtp_get_inbox_id_for_identifier(
         let url = unsafe { c_str_to_string(api_url)? };
         let ident = unsafe { parse_identifier(identifier, identifier_kind)? };
 
-        let mut backend = xmtp_api_d14n::MessageBackendBuilder::default();
-        backend.v3_host(&url).is_secure(is_secure != 0);
-        let api = backend.build()?;
+        let backend = xmtp_api_d14n::MessageBackendBuilder::default()
+            .v3_host(&url)
+            .is_secure(is_secure != 0)
+            .build()?;
+        let backend = xmtp_api_d14n::TrackedStatsClient::new(backend);
+        let api = xmtp_api::ApiClientWrapper::new(
+            std::sync::Arc::new(backend),
+            Default::default(),
+        );
 
-        use xmtp_api::ApiClientWrapper;
-        let api_wrapper = ApiClientWrapper::new(api, Default::default());
-
-        let inbox_id = api_wrapper
+        let inbox_id = api
             .get_inbox_ids(vec![ident.into()])
             .await?
             .into_values()

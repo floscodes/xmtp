@@ -1,5 +1,6 @@
 //! Single conversation operations: send, messages, members, metadata, permissions, consent.
 
+use std::collections::HashMap;
 use std::ffi::{CStr, CString, c_char};
 
 use xmtp_db::group::DmIdExt;
@@ -1579,13 +1580,18 @@ pub unsafe extern "C" fn xmtp_conversation_list_enriched_messages(
         let args = parse_msg_query_args(opts);
         let raw = conv.inner.find_messages(&args)?;
         let enriched = conv.inner.find_messages_v2(&args)?;
+        // Match by message ID rather than index to prevent data misalignment
+        // when rows are inserted or deleted between the two queries.
+        let raw_by_id: HashMap<&[u8], &[u8]> = raw
+            .iter()
+            .map(|r| (r.id.as_slice(), r.decrypted_message_bytes.as_slice()))
+            .collect();
         let items: Vec<FfiEnrichedMessage> = enriched
             .iter()
-            .enumerate()
-            .map(|(i, e)| {
-                let bytes = raw
-                    .get(i)
-                    .map(|r| r.decrypted_message_bytes.as_slice())
+            .map(|e| {
+                let bytes = raw_by_id
+                    .get(e.metadata.id.as_slice())
+                    .copied()
                     .unwrap_or(&[]);
                 decoded_to_enriched(e, bytes)
             })

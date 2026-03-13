@@ -401,7 +401,8 @@ pub unsafe extern "C" fn xmtp_stream_message_deletions(
         let ctx = context as usize;
 
         let guard = new_on_close_guard();
-        let g1 = guard;
+        let g1 = guard.clone();
+        let g2 = guard;
 
         let mut handle =
             MlsClient::stream_message_deletions_with_callback(c.inner.clone(), move |result| {
@@ -410,12 +411,30 @@ pub unsafe extern "C" fn xmtp_stream_message_deletions(
                         let id_hex = hex::encode(&decoded.metadata.id);
                         let c_str = std::ffi::CString::new(id_hex).unwrap_or_default();
                         unsafe { callback(c_str.as_ptr(), ctx as *mut c_void) };
-                        // c_str dropped here — borrowed during callback only
                     }
                     Err(e) => invoke_on_close_err(on_close, ctx, &e.to_string(), &g1),
                 }
             });
-        finalize_stream(&mut handle, out)
+
+        runtime().block_on(handle.wait_for_ready());
+        let abort = handle.abort_handle();
+        let abort_arc = Arc::new(abort);
+        let abort_monitor = Arc::clone(&abort_arc);
+
+        // The upstream API lacks a close callback parameter, so we spawn a
+        // lightweight task that polls `is_finished` and fires `on_close`
+        // once the stream terminates (via `xmtp_stream_end` or fatal error).
+        runtime().spawn(async move {
+            loop {
+                if abort_monitor.is_finished() {
+                    invoke_on_close_ok(on_close, ctx, &g2);
+                    break;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            }
+        });
+
+        unsafe { write_out(out, FfiStreamHandle { abort: abort_arc }) }
     })
 }
 

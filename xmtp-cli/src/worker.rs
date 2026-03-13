@@ -50,6 +50,11 @@ pub fn run(rx: mpsc::Receiver<Cmd>, tx: Tx, cmd_tx: CmdTx, profile: &str) {
 }
 
 /// Worker state — owns the [`Client`] and the active conversation handle.
+///
+/// Several methods use a take-put pattern on `active` (`take()` → use →
+/// `Some(…)`) because `send_msgs` requires `&mut self` (for ENS cache
+/// writes) while borrowing the conversation.  This is panic-safe in
+/// production because the release profile sets `panic = "abort"`.
 struct Worker {
     client: Client,
     tx: Tx,

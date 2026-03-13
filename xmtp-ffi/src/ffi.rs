@@ -48,6 +48,13 @@ pub struct FfiStreamHandle {
 
 // ---------------------------------------------------------------------------
 // Callback types
+//
+// # Thread Safety
+//
+// Stream callbacks and `on_close` may be invoked on **any** tokio worker
+// thread, not necessarily the thread that created the stream.  The `context`
+// pointer passed to callbacks must therefore point to thread-safe data
+// (or the C caller must provide its own synchronisation).
 // ---------------------------------------------------------------------------
 
 /// Callback for conversation stream events.
@@ -505,6 +512,13 @@ pub struct FfiLastReadTimeList {
 
 // ---------------------------------------------------------------------------
 // Thread-local error
+//
+// # Thread Safety
+//
+// Error state is **thread-local** (similar to POSIX `errno`).  The caller
+// must read the error on the **same OS thread** that made the failing FFI
+// call.  Reading from a different thread will see that thread's independent
+// (and likely empty) error state.
 // ---------------------------------------------------------------------------
 
 thread_local! {
@@ -584,13 +598,21 @@ where
     }
 }
 
-/// Execute an async closure on the shared runtime, set error on failure, return code.
+/// Execute an async closure, set error on failure, return code.
+///
+/// Detects whether the current thread is already inside the shared tokio
+/// runtime (e.g. when a C caller invokes an FFI function from within a
+/// stream callback) and uses [`tokio::task::block_in_place`] to avoid a
+/// nested `block_on` panic.
 pub(crate) fn catch_async<F, Fut>(f: F) -> i32
 where
     F: FnOnce() -> Fut,
     Fut: std::future::Future<Output = Result<(), Box<dyn std::error::Error>>>,
 {
-    catch(|| runtime().block_on(f()))
+    catch(|| match tokio::runtime::Handle::try_current() {
+        Ok(handle) => tokio::task::block_in_place(|| handle.block_on(f())),
+        Err(_) => runtime().block_on(f()),
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -774,7 +796,7 @@ macro_rules! ffi_list_len {
         #[unsafe(no_mangle)]
         pub unsafe extern "C" fn $fn_name(list: *const $list_ty) -> i32 {
             match unsafe { $crate::ffi::ref_from(list) } {
-                Ok(l) => l.items.len() as i32,
+                Ok(l) => l.items.len().min(i32::MAX as usize) as i32,
                 Err(_) => 0,
             }
         }
@@ -1019,6 +1041,10 @@ pub(crate) fn i32_to_content_type(v: i32) -> Option<xmtp_db::group_message::Cont
 }
 
 /// Parse a consent state filter from a raw int array. Shared by conversations and streams.
+///
+/// # Safety
+///
+/// `states` must point to a valid array of at least `count` `i32` values.
 pub(crate) fn parse_consent_states(
     states: *const i32,
     count: i32,
