@@ -709,9 +709,7 @@ fn read_key_package_status_list(
 }
 
 /// Read an FFI inbox state list into `Vec<InboxState>`.
-fn read_inbox_state_list(
-    ptr: *mut xmtp_sys::XmtpFfiInboxStateList,
-) -> Result<Vec<InboxState>> {
+fn read_inbox_state_list(ptr: *mut xmtp_sys::XmtpFfiInboxStateList) -> Result<Vec<InboxState>> {
     let list = FfiList::new(
         ptr,
         xmtp_sys::xmtp_inbox_state_list_len,

@@ -610,10 +610,8 @@ pub(crate) fn read_enriched_message_list(
         let content = if m.content_bytes.is_null() || m.content_bytes_len <= 0 {
             Vec::new()
         } else {
-            unsafe {
-                std::slice::from_raw_parts(m.content_bytes, ffi_usize(m.content_bytes_len))
-            }
-            .to_vec()
+            unsafe { std::slice::from_raw_parts(m.content_bytes, ffi_usize(m.content_bytes_len)) }
+                .to_vec()
         };
         msgs.push(Message {
             id: unsafe { c_str_to_string(m.id) },
@@ -656,9 +654,8 @@ fn read_member_list(ptr: *mut xmtp_sys::XmtpFfiGroupMemberList) -> Result<Vec<Gr
                 .unwrap_or(ConsentState::Unknown);
 
         let mut acct_count = 0i32;
-        let acct_ptr = unsafe {
-            xmtp_sys::xmtp_group_member_account_identifiers(lp, i, &raw mut acct_count)
-        };
+        let acct_ptr =
+            unsafe { xmtp_sys::xmtp_group_member_account_identifiers(lp, i, &raw mut acct_count) };
         let account_identifiers = unsafe { read_borrowed_strings(acct_ptr, acct_count) };
 
         let mut inst_count = 0i32;
@@ -797,18 +794,14 @@ pub(crate) fn read_hmac_key_map(ptr: *mut xmtp_sys::XmtpFfiHmacKeyMap) -> Vec<Hm
         let keys = if keys_ptr.is_null() || key_count <= 0 {
             vec![]
         } else {
-            let slice =
-                unsafe { std::slice::from_raw_parts(keys_ptr, ffi_usize(key_count)) };
+            let slice = unsafe { std::slice::from_raw_parts(keys_ptr, ffi_usize(key_count)) };
             slice
                 .iter()
                 .map(|k| {
                     let key = if k.key.is_null() || k.key_len <= 0 {
                         vec![]
                     } else {
-                        unsafe {
-                            std::slice::from_raw_parts(k.key, ffi_usize(k.key_len))
-                        }
-                        .to_vec()
+                        unsafe { std::slice::from_raw_parts(k.key, ffi_usize(k.key_len)) }.to_vec()
                     };
                     HmacKey {
                         key,

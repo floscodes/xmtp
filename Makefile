@@ -1,135 +1,55 @@
-# Makefile for qntx/xmtp — XMTP Rust Client SDK
-#
-# Workspace members : xmtp-sys, xmtp, xmtp-cli
-# Standalone crate  : xmtp-ffi (excluded from workspace, own dependency tree)
+# Makefile for Rust project using Cargo
 
-FFI_DIR := xmtp-ffi
+.PHONY: all build check run test bench clippy clippy-fix fmt doc update
 
-.PHONY: all
-all: pre-commit
+all: fmt clippy-fix
 
-# Build the workspace in release mode
-.PHONY: build
+# Build the project with all features enabled in release mode
 build:
-	cargo build --release --all-features
+	cargo build --workspace --release --all-features
 
-# Quick compilation check without codegen
-.PHONY: check
+# Check the project for compilation errors without producing binaries
 check:
-	cargo check --all-features
+	cargo check --workspace --all-features
 
-# Run all workspace tests
-.PHONY: test
-test:
-	cargo test --all-features
+# Update dependencies to their latest compatible versions
+update:
+	cargo update
 
-# Run benchmarks
-.PHONY: bench
-bench:
-	cargo bench --all-features
-
-# Run the CLI binary
-.PHONY: run
+# Run the project with all features enabled in release mode
 run:
 	cargo run --release --all-features
 
-# Lint with Clippy (auto-fix). Excludes xmtp-sys (auto-generated bindings).
-.PHONY: clippy
+# Run all tests with all features enabled
+test:
+	cargo test --workspace --all-features
+
+# Run benchmarks with all features enabled
+bench:
+	cargo bench --all-features
+
+# Run Clippy linter with nightly toolchain (check only, for CI)
+# Uses workspace lints from Cargo.toml
 clippy:
-	cargo +nightly clippy --fix \
+	cargo +nightly clippy --workspace \
+		--all-targets \
+		--all-features \
+		-- -D warnings
+
+# Run Clippy linter with auto-fix (for development)
+clippy-fix:
+	cargo +nightly clippy --workspace \
+		--fix \
 		--all-targets \
 		--all-features \
 		--allow-dirty \
 		--allow-staged \
 		-- -D warnings
 
-# Format workspace code
-.PHONY: fmt
+# Format the code using rustfmt with nightly toolchain
 fmt:
 	cargo +nightly fmt
 
-# Check formatting without modifying files
-.PHONY: fmt-check
-fmt-check:
-	cargo +nightly fmt --check
-
-# Generate and open documentation
-.PHONY: doc
+# Generate documentation for all crates and open it in the browser
 doc:
 	cargo +nightly doc --all-features --no-deps --open
-
-# Build the FFI static library in release mode
-# Toolchain is auto-selected by xmtp-ffi/rust-toolchain.toml (nightly, for cbindgen)
-.PHONY: ffi-build
-ffi-build:
-	cd $(FFI_DIR) && cargo build --release
-
-# Quick compilation check for FFI
-# Toolchain is auto-selected by xmtp-ffi/rust-toolchain.toml (nightly, for cbindgen)
-.PHONY: ffi-check
-ffi-check:
-	cd $(FFI_DIR) && cargo check
-
-# Lint FFI code with Clippy (auto-fix)
-.PHONY: ffi-clippy
-ffi-clippy:
-	cd $(FFI_DIR) && cargo clippy --fix \
-		--all-targets \
-		--allow-dirty \
-		--allow-staged \
-		-- -D warnings
-
-# Format FFI code
-.PHONY: ffi-fmt
-ffi-fmt:
-	cd $(FFI_DIR) && cargo fmt
-
-# Check FFI formatting without modifying files
-.PHONY: ffi-fmt-check
-ffi-fmt-check:
-	cd $(FFI_DIR) && cargo fmt --check
-
-.PHONY: fmt-all
-fmt-all: fmt ffi-fmt
-
-.PHONY: fmt-check-all
-fmt-check-all: fmt-check ffi-fmt-check
-
-.PHONY: clippy-all
-clippy-all: clippy ffi-clippy
-
-.PHONY: check-all
-check-all: check ffi-check
-
-.PHONY: build-all
-build-all: build ffi-build
-
-# Update dependencies for both workspace and FFI
-.PHONY: update
-update:
-	cargo update
-	cd $(FFI_DIR) && cargo update
-
-# Regenerate xmtp-sys/src/bindings.rs from the FFI header.
-# Pipeline: build xmtp-ffi (cbindgen → xmtp_ffi.h) → bindgen → src/bindings.rs
-.PHONY: regenerate-bindings
-regenerate-bindings: ffi-check
-	set "XMTP_FFI_DIR=../$(FFI_DIR)" && set "XMTP_UPDATE_BINDINGS=1" && cargo check -p xmtp-sys --features regenerate
-
-# Check for unused dependencies (workspace only)
-.PHONY: udeps
-udeps:
-	cargo +nightly udeps --all-features
-
-# Generate CHANGELOG.md using git-cliff
-.PHONY: cliff
-cliff:
-	git cliff --output CHANGELOG.md
-
-.PHONY: pre-commit
-pre-commit:
-	$(MAKE) fmt-all
-	$(MAKE) clippy-all
-	$(MAKE) test
-	$(MAKE) build
-	$(MAKE) cliff

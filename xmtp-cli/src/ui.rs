@@ -718,8 +718,7 @@ fn wrap_text(text: &str, max_width: usize) -> Vec<String> {
 fn format_relative(ns: i64) -> String {
     let now_ns = SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
-        .map(|d| d.as_nanos() as i64)
-        .unwrap_or(0);
+        .map_or(0, |d| d.as_nanos() as i64);
     let secs = (now_ns - ns) / 1_000_000_000;
     if secs < 60 {
         "now".into()
