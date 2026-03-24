@@ -1,5 +1,5 @@
 ---
-name: xmtp-messaging
+name: xmtp
 description: >-
   Send and receive messages via the XMTP decentralized messaging protocol
   using the xmtp CLI tool. Use when the user asks to send, read, or monitor
