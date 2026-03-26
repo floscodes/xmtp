@@ -460,6 +460,7 @@ fn draw_help(frame: &mut Frame<'_>, area: Rect) {
         help_line("P", "Permissions"),
         Line::default(),
         help_line("↑/↓", "Scroll chat (input mode)"),
+        help_line("Ctrl+p", "Toggle push notification"),
         help_line("Ctrl+C / q", "Quit"),
         Line::default(),
         Line::from(Span::styled(
