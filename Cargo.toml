@@ -15,12 +15,12 @@ description = "Client library for the XMTP messaging protocol."
 xmtp = { version = "0.8", path = "xmtp" }
 xmtp-sys = { version = "0.1", path = "xmtp-sys" }
 
-alloy-ens = { version = "1.7.3", default-features = false, features = ["provider"] }
+alloy-ens = { version = "1.8.2", default-features = false, features = ["provider"] }
 alloy-primitives = { version = "1.5.7", default-features = false }
-alloy-provider = "1.7.3"
-alloy-signer = "1.7.3"
-alloy-signer-ledger = "1.7.3"
-alloy-signer-local = { version = "1.7.3", default-features = false }
+alloy-provider = "1.8.2"
+alloy-signer = "1.8.2"
+alloy-signer-ledger = "1.8.2"
+alloy-signer-local = { version = "1.8.2", default-features = false }
 clap = { version = "4.6.0", features = ["derive"] }
 bindgen = "0.72.1"
 dirs = "6.0.0"

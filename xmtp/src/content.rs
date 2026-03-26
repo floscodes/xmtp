@@ -602,10 +602,12 @@ impl Conversation {
     pub fn send_text(&self, text: &str) -> Result<String> {
         self.send(&encode_text(text))
     }
-    /// Send plan test message with options.
+
+    /// Send a plain text message with options.
     pub fn send_text_with(&self, text: &str, opts: &SendOptions) -> Result<String> {
         self.send_with(&encode_text(text), opts)
     }
+
     /// Send a markdown message.
     pub fn send_markdown(&self, markdown: &str) -> Result<String> {
         self.send(&encode_markdown(markdown))

@@ -9,7 +9,7 @@ use std::sync::mpsc;
 use xmtp::{
     Client, ConsentState, ConversationOrderBy, ConversationType, CreateGroupOptions,
     DeliveryStatus, EnsResolver, ListConversationsOptions, ListMessagesOptions, Message, Recipient,
-    SortDirection, stream, types::SendOptions,
+    SendOptions, SortDirection, stream,
 };
 
 use crate::cmd::config;
@@ -170,9 +170,7 @@ impl Worker {
     fn dispatch(&mut self, cmd: Cmd) {
         match cmd {
             Cmd::Open(id) => self.open(&id),
-            Cmd::Send { text, push } => {
-                self.send_text(&text, push);
-            }
+            Cmd::Send { text, push } => self.send_text(&text, push),
             Cmd::CreateDm(input) => self.create_dm(&input),
             Cmd::CreateGroup { name, addrs } => self.create_group(name, addrs),
             Cmd::SetConsent { id, state } => self.set_consent(&id, state),

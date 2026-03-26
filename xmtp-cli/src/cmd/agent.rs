@@ -180,7 +180,7 @@ pub fn messages(
     Ok(())
 }
 
-/// `xmtp send <conv_id> <text> [--json]`
+/// `xmtp send <conv_id> <text> [--push] [--json]`
 pub fn send(profile: &str, conv_id: &str, text: &str, push: bool, json: bool) -> xmtp::Result<()> {
     let (_, client) = config::open_client(profile)?;
 
