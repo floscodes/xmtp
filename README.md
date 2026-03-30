@@ -17,6 +17,10 @@
 
 xmtp wraps the official [`libxmtp`](https://github.com/xmtp/libxmtp) FFI layer with idiomatic Rust types, providing a high-level `Client` → `Conversation` → `Message` API for DMs, groups, content types, identity management, ENS resolution, and real-time streaming. The CLI crate ships a full-featured terminal chat interface with profile-based persistent configuration.
 
+<div align="center">
+<img src="demo.gif" alt="TUI Demo"/>
+</div>
+
 ## Crates
 
 | Crate | | Description |
