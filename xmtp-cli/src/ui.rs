@@ -1,4 +1,8 @@
 //! TUI rendering: header, tabbed sidebar, chat bubbles, input, overlays.
+#![allow(
+    clippy::indexing_slicing,
+    reason = "Layout::split() indices are guaranteed by the constraint count"
+)]
 
 use std::time::SystemTime;
 
@@ -229,71 +233,10 @@ fn draw_chat(app: &mut App, frame: &mut Frame<'_>, area: Rect) {
             continue;
         }
         let is_me = msg.sender_inbox_id == app.inbox_id;
-        let body = decode::body(msg);
-        let time = format_relative(msg.sent_at_ns);
-
-        let wrapped = wrap_text(&body, max_bubble.saturating_sub(4));
-        let content_w = wrapped
-            .iter()
-            .map(|l| UnicodeWidthStr::width(l.as_str()))
-            .max()
-            .unwrap_or(0);
-        let box_w = content_w + 2;
-        let total_w = box_w + 2;
-
         if is_me {
-            let status = decode::delivery_icon(msg.delivery_status);
-            let header = format!("{time}  {status}");
-            let h_width = UnicodeWidthStr::width(header.as_str());
-            let h_pad = chat_w.saturating_sub(h_width);
-            lines.push(Line::from(vec![
-                Span::raw(" ".repeat(h_pad)),
-                Span::styled(header, Style::default().fg(DIM)),
-            ]));
-
-            let b_pad = chat_w.saturating_sub(total_w);
-            let top = format!("╭{}╮", "─".repeat(box_w));
-            let bot = format!("╰{}╯", "─".repeat(box_w));
-            let style = Style::default().fg(SELF_CLR);
-
-            lines.push(Line::from(vec![
-                Span::raw(" ".repeat(b_pad)),
-                Span::styled(top, style),
-            ]));
-            for wl in &wrapped {
-                let pad = content_w.saturating_sub(UnicodeWidthStr::width(wl.as_str()));
-                let row = format!("│ {}{} │", wl, " ".repeat(pad));
-                lines.push(Line::from(vec![
-                    Span::raw(" ".repeat(b_pad)),
-                    Span::styled(row, style),
-                ]));
-            }
-            lines.push(Line::from(vec![
-                Span::raw(" ".repeat(b_pad)),
-                Span::styled(bot, style),
-            ]));
+            push_self_bubble(&mut lines, msg, chat_w, max_bubble);
         } else {
-            let sender_raw = app
-                .address_map
-                .get(&msg.sender_inbox_id)
-                .map_or(msg.sender_inbox_id.as_str(), String::as_str);
-            let sender = decode::truncate_id(sender_raw, 16);
-            lines.push(Line::from(vec![
-                Span::styled(format!("  {sender}"), Style::default().fg(PEER_CLR)),
-                Span::styled(format!("  {time}"), Style::default().fg(DIM)),
-            ]));
-
-            let top = format!("  ╭{}╮", "─".repeat(box_w));
-            let bot = format!("  ╰{}╯", "─".repeat(box_w));
-            let style = Style::default().fg(PEER_CLR);
-
-            lines.push(Line::from(Span::styled(top, style)));
-            for wl in &wrapped {
-                let pad = content_w.saturating_sub(UnicodeWidthStr::width(wl.as_str()));
-                let row = format!("  │ {}{} │", wl, " ".repeat(pad));
-                lines.push(Line::from(Span::styled(row, style)));
-            }
-            lines.push(Line::from(Span::styled(bot, style)));
+            push_peer_bubble(&mut lines, msg, &app.address_map, max_bubble);
         }
         lines.push(Line::default());
     }
@@ -316,13 +259,103 @@ fn draw_chat(app: &mut App, frame: &mut Frame<'_>, area: Rect) {
 
     if offset > 0 {
         let indicator = format!(" ↑{offset} ");
-        #[allow(clippy::cast_possible_truncation)]
+        #[allow(
+            clippy::cast_possible_truncation,
+            reason = "indicator length is always small"
+        )]
         let x = area.x + area.width.saturating_sub(indicator.len() as u16 + 2);
         frame.render_widget(
             Paragraph::new(Span::styled(indicator, Style::default().fg(ACCENT))),
             Rect::new(x, area.y, 10, 1),
         );
     }
+}
+
+fn push_self_bubble(
+    lines: &mut Vec<Line<'_>>,
+    msg: &xmtp::Message,
+    chat_w: usize,
+    max_bubble: usize,
+) {
+    let body = decode::body(msg);
+    let time = format_relative(msg.sent_at_ns);
+    let wrapped = wrap_text(&body, max_bubble.saturating_sub(4));
+    let content_w = wrapped
+        .iter()
+        .map(|l| UnicodeWidthStr::width(l.as_str()))
+        .max()
+        .unwrap_or(0);
+    let box_w = content_w + 2;
+    let total_w = box_w + 2;
+
+    let status = decode::delivery_icon(msg.delivery_status);
+    let header = format!("{time}  {status}");
+    let h_width = UnicodeWidthStr::width(header.as_str());
+    let h_pad = chat_w.saturating_sub(h_width);
+    lines.push(Line::from(vec![
+        Span::raw(" ".repeat(h_pad)),
+        Span::styled(header, Style::default().fg(DIM)),
+    ]));
+
+    let b_pad = chat_w.saturating_sub(total_w);
+    let top = format!("╭{}╮", "─".repeat(box_w));
+    let bot = format!("╰{}╯", "─".repeat(box_w));
+    let style = Style::default().fg(SELF_CLR);
+
+    lines.push(Line::from(vec![
+        Span::raw(" ".repeat(b_pad)),
+        Span::styled(top, style),
+    ]));
+    for wl in &wrapped {
+        let pad = content_w.saturating_sub(UnicodeWidthStr::width(wl.as_str()));
+        let row = format!("│ {}{} │", wl, " ".repeat(pad));
+        lines.push(Line::from(vec![
+            Span::raw(" ".repeat(b_pad)),
+            Span::styled(row, style),
+        ]));
+    }
+    lines.push(Line::from(vec![
+        Span::raw(" ".repeat(b_pad)),
+        Span::styled(bot, style),
+    ]));
+}
+
+fn push_peer_bubble(
+    lines: &mut Vec<Line<'_>>,
+    msg: &xmtp::Message,
+    address_map: &std::collections::BTreeMap<String, String>,
+    max_bubble: usize,
+) {
+    let body = decode::body(msg);
+    let time = format_relative(msg.sent_at_ns);
+    let wrapped = wrap_text(&body, max_bubble.saturating_sub(4));
+    let content_w = wrapped
+        .iter()
+        .map(|l| UnicodeWidthStr::width(l.as_str()))
+        .max()
+        .unwrap_or(0);
+    let box_w = content_w + 2;
+
+    let sender_raw = address_map
+        .get(&msg.sender_inbox_id)
+        .map_or(msg.sender_inbox_id.as_str(), String::as_str);
+    let sender = decode::truncate_id(sender_raw, 16);
+    lines.push(Line::from(vec![
+        Span::styled(format!("  {sender}"), Style::default().fg(PEER_CLR)),
+        Span::styled(format!("  {time}"), Style::default().fg(DIM)),
+    ]));
+
+    let top = format!("  ╭{}╮", "─".repeat(box_w));
+    let bot = format!("  ╰{}╯", "─".repeat(box_w));
+    let style = Style::default().fg(PEER_CLR);
+
+    lines.push(Line::from(Span::styled(top, style)));
+    for wl in &wrapped {
+        let pad = content_w.saturating_sub(UnicodeWidthStr::width(wl.as_str()));
+        let row = format!("  │ {}{} │", wl, " ".repeat(pad));
+        lines.push(Line::from(Span::styled(row, style)));
+    }
+    lines.push(Line::from(Span::styled(bot, style)));
 }
 
 fn draw_input(app: &App, frame: &mut Frame<'_>, area: Rect) {
@@ -473,7 +506,7 @@ fn draw_help(frame: &mut Frame<'_>, area: Rect) {
 
     // +2 for top/bottom borders.
     let w = 52.min(area.width.saturating_sub(4));
-    #[allow(clippy::cast_possible_truncation)]
+    #[allow(clippy::cast_possible_truncation, reason = "help lines fit in u16")]
     let h = (help.len() as u16 + 2).min(area.height.saturating_sub(4));
     let popup = centered(area, w, h);
 
@@ -494,7 +527,7 @@ fn draw_members(app: &App, frame: &mut Frame<'_>, area: Rect) {
     // Footer: 1 hint + optional desc + optional input.
     let footer_h = 1 + u16::from(has_desc) + u16::from(adding);
     // Each member: 1 label line + N address lines.
-    #[allow(clippy::cast_possible_truncation)]
+    #[allow(clippy::cast_possible_truncation, reason = "member count fits in u16")]
     let content_h: u16 = app
         .members
         .iter()
@@ -583,7 +616,10 @@ fn draw_members(app: &App, frame: &mut Frame<'_>, area: Rect) {
 
 fn draw_permissions(app: &App, frame: &mut Frame<'_>, area: Rect) {
     let w = 50.min(area.width.saturating_sub(4));
-    #[allow(clippy::cast_possible_truncation)]
+    #[allow(
+        clippy::cast_possible_truncation,
+        reason = "permission rows fit in u16"
+    )]
     let h = (app.permissions.len() as u16 + 4).min(area.height.saturating_sub(4));
     let popup = centered(area, w, h);
 
@@ -695,14 +731,14 @@ fn wrap_text(text: &str, max_width: usize) -> Vec<String> {
                 result.push(std::mem::take(&mut line));
                 word.clone_into(&mut line);
                 width = ww;
-            } else {
-                if width > 0 {
-                    line.push(' ');
-                    width += 1;
-                }
-                line.push_str(word);
-                width += ww;
+                continue;
             }
+            if width > 0 {
+                line.push(' ');
+                width += 1;
+            }
+            line.push_str(word);
+            width += ww;
         }
         if !line.is_empty() {
             result.push(line);
@@ -715,7 +751,10 @@ fn wrap_text(text: &str, max_width: usize) -> Vec<String> {
 }
 
 /// Format a nanosecond timestamp as relative time.
-#[allow(clippy::cast_possible_truncation)]
+#[allow(
+    clippy::cast_possible_truncation,
+    reason = "timestamp arithmetic stays within i64 range"
+)]
 fn format_relative(ns: i64) -> String {
     let now_ns = SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)

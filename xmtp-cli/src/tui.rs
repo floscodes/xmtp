@@ -29,7 +29,7 @@ pub(crate) fn restore() -> io::Result<()> {
 pub(crate) fn install_panic_hook() {
     let original = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
-        let _ = restore();
+        drop(restore());
         original(info);
     }));
 }

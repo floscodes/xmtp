@@ -71,27 +71,15 @@ impl ProfileConfig {
         let mut address = String::new();
 
         for line in text.lines() {
-            if let Some((k, v)) = line.trim().split_once('=') {
-                match k.trim() {
-                    "env" => {
-                        env = super::parse_env(v.trim()).map_err(xmtp::XmtpError::Ffi)?;
-                    }
-                    "rpc_url" => v.trim().clone_into(&mut rpc_url),
-                    "signer" => {
-                        signer = if v.trim().starts_with("ledger") {
-                            let idx = v
-                                .trim()
-                                .strip_prefix("ledger:")
-                                .and_then(|n| n.parse().ok())
-                                .unwrap_or(0);
-                            SignerKind::Ledger(idx)
-                        } else {
-                            SignerKind::File
-                        };
-                    }
-                    "address" => v.trim().clone_into(&mut address),
-                    _ => {}
-                }
+            let Some((k, v)) = line.trim().split_once('=') else {
+                continue;
+            };
+            match k.trim() {
+                "env" => env = super::parse_env(v.trim()).map_err(xmtp::XmtpError::Ffi)?,
+                "rpc_url" => v.trim().clone_into(&mut rpc_url),
+                "signer" => signer = parse_signer(v.trim()),
+                "address" => v.trim().clone_into(&mut address),
+                _ => {}
             }
         }
 
@@ -128,10 +116,10 @@ pub(crate) fn open_client(profile: &str) -> xmtp::Result<(ProfileConfig, Client)
 
     if cfg.address.is_empty() {
         // Legacy profile: need signer to discover wallet address.
-        let (mut cfg, signer, client) = open_with_signer(profile)?;
-        cfg.address = signer.identifier().address;
-        cfg.save(profile)?;
-        return Ok((cfg, client));
+        let (mut migrated, signer, client) = open_with_signer(profile)?;
+        migrated.address = signer.identifier().address;
+        migrated.save(profile)?;
+        return Ok((migrated, client));
     }
 
     let db = profile_dir(profile).join("messages.db3");
@@ -190,11 +178,23 @@ pub(crate) fn build_client(
         Ok(c) => Ok(c),
         Err(e) if e.to_string().contains("does not match the stored InboxId") => {
             for ext in ["", "-shm", "-wal"] {
-                let _ = fs::remove_file(format!("{db_path}{ext}"));
+                drop(fs::remove_file(format!("{db_path}{ext}")));
             }
             build(db_path)
         }
         Err(e) => Err(e),
+    }
+}
+
+fn parse_signer(value: &str) -> SignerKind {
+    if value.starts_with("ledger") {
+        let idx = value
+            .strip_prefix("ledger:")
+            .and_then(|n| n.parse().ok())
+            .unwrap_or(0);
+        SignerKind::Ledger(idx)
+    } else {
+        SignerKind::File
     }
 }
 

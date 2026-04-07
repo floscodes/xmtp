@@ -3,7 +3,7 @@
 //! The main thread sends [`Cmd`] requests; the worker processes them and
 //! sends [`Event`] results back. Stream callbacks also route through here.
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::sync::mpsc;
 
 use xmtp::{
@@ -23,14 +23,17 @@ use crate::event::{
 ///
 /// Client construction + sync happen here (on the worker thread) so the TUI
 /// renders immediately without blocking on network setup.
-#[allow(clippy::needless_pass_by_value)]
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "mpsc::Receiver must be moved into the worker thread"
+)]
 pub(crate) fn run(rx: mpsc::Receiver<Cmd>, tx: Tx, cmd_tx: CmdTx, profile: &str) {
-    let _ = tx.send(Event::Flash("Connecting...".into()));
+    drop(tx.send(Event::Flash("Connecting...".into())));
 
     let (cfg, client) = match config::open_client(profile) {
         Ok(r) => r,
         Err(e) => {
-            let _ = tx.send(Event::Flash(format!("Fatal: {e}")));
+            drop(tx.send(Event::Flash(format!("Fatal: {e}"))));
             return;
         }
     };
@@ -39,8 +42,8 @@ pub(crate) fn run(rx: mpsc::Receiver<Cmd>, tx: Tx, cmd_tx: CmdTx, profile: &str)
     w.start_streams(&cmd_tx);
 
     w.flash("Syncing...");
-    let _ = w.client.sync_welcomes();
-    let _ = w.client.sync_all(&[]);
+    drop(w.client.sync_welcomes());
+    drop(w.client.sync_all(&[]));
     w.send_conversations();
     w.flash("Ready");
 
@@ -63,7 +66,7 @@ struct Worker {
     /// Current user's wallet address (lowercase).
     my_address: String,
     /// address (lowercase) → `Some("name.eth")` | `None` (no reverse record / pending).
-    ens_cache: HashMap<String, Option<String>>,
+    ens_cache: BTreeMap<String, Option<String>>,
     /// Send addresses to the background ENS resolver thread.
     ens_tx: Option<mpsc::Sender<String>>,
 }
@@ -74,8 +77,8 @@ impl Worker {
         let my_address = address.to_lowercase();
 
         // Queue own address for background ENS reverse resolution.
-        if let Some(ref tx) = ens_tx {
-            let _ = tx.send(my_address.clone());
+        if let Some(ref ens) = ens_tx {
+            drop(ens.send(my_address.clone()));
         }
 
         Self {
@@ -87,7 +90,7 @@ impl Worker {
                 ..Default::default()
             },
             my_address,
-            ens_cache: HashMap::new(),
+            ens_cache: BTreeMap::new(),
             ens_tx,
         }
     }
@@ -100,31 +103,7 @@ impl Worker {
         let resolver = EnsResolver::new(rpc_url).ok()?;
         let (tx, rx) = mpsc::channel::<String>();
         let cmd = cmd_tx.clone();
-        std::thread::spawn(move || {
-            use xmtp::Resolver;
-            let mut failures: u8 = 0;
-            while let Ok(addr) = rx.recv() {
-                // Circuit breaker: stop resolving after 3 consecutive failures.
-                let name = if failures >= 3 {
-                    None
-                } else if let Ok(n) = resolver.reverse_resolve(&addr) {
-                    failures = 0;
-                    n
-                } else {
-                    failures += 1;
-                    None
-                };
-                if cmd
-                    .send(Cmd::EnsResolved {
-                        address: addr,
-                        name,
-                    })
-                    .is_err()
-                {
-                    break;
-                }
-            }
-        });
+        std::thread::spawn(move || ens_resolver_loop(&resolver, &rx, &cmd));
         Some(tx)
     }
 
@@ -136,32 +115,14 @@ impl Worker {
         match stream::messages(&self.client, None, &[]) {
             Ok(sub) => {
                 let tx = cmd_tx.clone();
-                std::thread::spawn(move || {
-                    for ev in sub {
-                        if tx
-                            .send(Cmd::StreamMsg {
-                                msg_id: ev.message_id,
-                                conv_id: ev.conversation_id,
-                            })
-                            .is_err()
-                        {
-                            break;
-                        }
-                    }
-                });
+                std::thread::spawn(move || forward_messages(sub, &tx));
             }
             Err(e) => self.flash(&format!("Message stream: {e}")),
         }
         match stream::conversations(&self.client, None) {
             Ok(sub) => {
                 let tx = cmd_tx.clone();
-                std::thread::spawn(move || {
-                    for _ in sub {
-                        if tx.send(Cmd::StreamConv).is_err() {
-                            break;
-                        }
-                    }
-                });
+                std::thread::spawn(move || forward_conversations(sub, &tx));
             }
             Err(e) => self.flash(&format!("Conversation stream: {e}")),
         }
@@ -188,7 +149,7 @@ impl Worker {
             Cmd::ToggleAdmin(id) => self.toggle_admin(&id),
             Cmd::StreamMsg { msg_id, conv_id } => self.on_stream_msg(&msg_id, conv_id),
             Cmd::StreamConv => {
-                let _ = self.client.sync_welcomes();
+                drop(self.client.sync_welcomes());
                 self.send_conversations();
             }
             Cmd::EnsResolved { address, name } => self.on_ens_resolved(&address, name),
@@ -202,7 +163,9 @@ impl Worker {
     /// ensures instant navigation between conversations.
     fn open(&mut self, id: &str) {
         if self.active.as_ref().is_some_and(|(aid, _)| aid == id) {
-            let (aid, conv) = self.active.take().expect("checked");
+            let Some((aid, conv)) = self.active.take() else {
+                return;
+            };
             self.send_msgs(id, &conv);
             self.active = Some((aid, conv));
             return;
@@ -217,10 +180,10 @@ impl Worker {
     /// Shared post-creation setup for DM and group conversations.
     fn activate(&mut self, conv: xmtp::Conversation, label: &str) {
         let id = conv.id();
-        let _ = conv.set_consent(ConsentState::Allowed);
-        let _ = self.tx.send(Event::Created {
+        drop(conv.set_consent(ConsentState::Allowed));
+        drop(self.tx.send(Event::Created {
             conv_id: id.clone(),
-        });
+        }));
         self.send_msgs(&id, &conv);
         self.active = Some((id, conv));
         self.send_conversations();
@@ -290,7 +253,7 @@ impl Worker {
         let Ok(Some(conv)) = self.client.conversation(id) else {
             return;
         };
-        let _ = conv.set_consent(state);
+        drop(conv.set_consent(state));
         self.send_conversations();
         self.flash(match state {
             ConsentState::Allowed => "Accepted",
@@ -300,7 +263,7 @@ impl Worker {
     }
 
     fn sync(&mut self) {
-        let _ = self.client.sync_all(&[]);
+        drop(self.client.sync_all(&[]));
         self.send_conversations();
         if let Some((id, conv)) = self.active.take() {
             self.send_msgs(&id, &conv);
@@ -403,22 +366,24 @@ impl Worker {
     fn on_stream_msg(&mut self, msg_id: &str, conv_id: String) {
         let is_active = self.active.as_ref().is_some_and(|(id, _)| *id == conv_id);
         if is_active {
-            let (id, conv) = self.active.take().expect("checked");
+            let Some((id, conv)) = self.active.take() else {
+                return;
+            };
             self.send_msgs(&conv_id, &conv);
             self.active = Some((id, conv));
         }
         if let Ok(Some(msg)) = self.client.message_by_id(msg_id) {
-            let _ = self.tx.send(Event::Preview {
+            drop(self.tx.send(Event::Preview {
                 conv_id,
                 text: decode::preview(&msg),
                 time_ns: msg.sent_at_ns,
                 unread: !is_active,
-            });
+            }));
         }
     }
 
     fn flash(&self, msg: &str) {
-        let _ = self.tx.send(Event::Flash(msg.into()));
+        drop(self.tx.send(Event::Flash(msg.into())));
     }
 
     fn load_messages(&self, conv: &xmtp::Conversation) -> Vec<Message> {
@@ -429,18 +394,18 @@ impl Worker {
 
     fn send_msgs(&mut self, conv_id: &str, conv: &xmtp::Conversation) {
         let address_map = self.build_address_map(conv);
-        let _ = self.tx.send(Event::Messages {
+        drop(self.tx.send(Event::Messages {
             conv_id: conv_id.to_owned(),
             msgs: self.load_messages(conv),
             address_map,
-        });
+        }));
     }
 
     /// Build an `inbox_id` → display name map from the conversation members.
     ///
     /// Resolution priority: ENS name > wallet address > inbox ID.
-    fn build_address_map(&mut self, conv: &xmtp::Conversation) -> HashMap<String, String> {
-        let mut map = HashMap::new();
+    fn build_address_map(&mut self, conv: &xmtp::Conversation) -> BTreeMap<String, String> {
+        let mut map = BTreeMap::new();
         if let Ok(members) = conv.members() {
             for m in members {
                 let addr = m.account_identifiers.first().cloned();
@@ -455,11 +420,11 @@ impl Worker {
         let inbox = self.build_conv_list(&[ConsentState::Allowed]);
         let requests = self.build_conv_list(&[ConsentState::Unknown]);
         let hidden = self.build_conv_list(&[ConsentState::Denied]);
-        let _ = self.tx.send(Event::Conversations {
+        drop(self.tx.send(Event::Conversations {
             inbox,
             requests,
             hidden,
-        });
+        }));
     }
 
     fn send_members(&mut self) {
@@ -486,10 +451,10 @@ impl Worker {
                     })
                     .collect();
                 let info = GroupInfo { description: desc };
-                let _ = self.tx.send(Event::Members {
+                drop(self.tx.send(Event::Members {
                     members: entries,
                     info,
-                });
+                }));
             }
             Err(e) => self.flash(&format!("Members: {e}")),
         }
@@ -541,7 +506,7 @@ impl Worker {
                         metadata_field: Some(MetadataField::Description),
                     },
                 ];
-                let _ = self.tx.send(Event::Permissions(rows));
+                drop(self.tx.send(Event::Permissions(rows)));
             }
             Err(e) => self.flash(&format!("Permissions: {e}")),
         }
@@ -614,7 +579,7 @@ impl Worker {
         // Pre-cache as pending (dedup) and queue for background resolution.
         self.ens_cache.insert(key.clone(), None);
         if let Some(ref tx) = self.ens_tx {
-            let _ = tx.send(key);
+            drop(tx.send(key));
         }
         decode::truncate_id(raw, 16)
     }
@@ -630,7 +595,7 @@ impl Worker {
         if key == self.my_address
             && let Some(ref n) = name
         {
-            let _ = self.tx.send(Event::Identity(n.clone()));
+            drop(self.tx.send(Event::Identity(n.clone())));
         }
 
         self.ens_cache.insert(key, name);
@@ -664,6 +629,53 @@ impl Worker {
                 self.flash(&format!("canMessage: {e}"));
                 false
             }
+        }
+    }
+}
+
+fn ens_resolver_loop(resolver: &EnsResolver, rx: &mpsc::Receiver<String>, cmd: &CmdTx) {
+    use xmtp::Resolver;
+    let mut failures: u8 = 0;
+    while let Ok(addr) = rx.recv() {
+        let name = if failures >= 3 {
+            None
+        } else if let Ok(n) = resolver.reverse_resolve(&addr) {
+            failures = 0;
+            n
+        } else {
+            failures += 1;
+            None
+        };
+        if cmd
+            .send(Cmd::EnsResolved {
+                address: addr,
+                name,
+            })
+            .is_err()
+        {
+            break;
+        }
+    }
+}
+
+fn forward_messages(sub: stream::Subscription<stream::MessageEvent>, tx: &CmdTx) {
+    for ev in sub {
+        if tx
+            .send(Cmd::StreamMsg {
+                msg_id: ev.message_id,
+                conv_id: ev.conversation_id,
+            })
+            .is_err()
+        {
+            break;
+        }
+    }
+}
+
+fn forward_conversations(sub: stream::Subscription<xmtp::Conversation>, tx: &CmdTx) {
+    for _ in sub {
+        if tx.send(Cmd::StreamConv).is_err() {
+            break;
         }
     }
 }

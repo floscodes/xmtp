@@ -126,12 +126,12 @@ mod tests {
         ];
         for (label, url) in rpcs {
             let resolver = EnsResolver::new(url).expect("create resolver");
-            let t = std::time::Instant::now();
-            let r = resolver.resolve("vitalik.eth");
-            eprintln!("[{label}] resolve: {r:?} ({:.1?})", t.elapsed());
-            let t = std::time::Instant::now();
-            let r = resolver.reverse_resolve("0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045");
-            eprintln!("[{label}] reverse: {r:?} ({:.1?})", t.elapsed());
+            let t1 = std::time::Instant::now();
+            let r1 = resolver.resolve("vitalik.eth");
+            eprintln!("[{label}] resolve: {r1:?} ({:.1?})", t1.elapsed());
+            let t2 = std::time::Instant::now();
+            let r2 = resolver.reverse_resolve("0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045");
+            eprintln!("[{label}] reverse: {r2:?} ({:.1?})", t2.elapsed());
         }
     }
 

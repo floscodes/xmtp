@@ -7,7 +7,8 @@
     missing_docs,
     missing_debug_implementations,
     clippy::print_stderr,
-    clippy::print_stdout
+    clippy::print_stdout,
+    reason = "CLI binary: docs and print lints are not applicable"
 )]
 
 mod app;
@@ -18,7 +19,6 @@ mod tui;
 mod ui;
 mod worker;
 
-use std::process;
 use std::sync::mpsc;
 use std::time::Duration;
 
@@ -30,20 +30,22 @@ use crate::cmd::{Cli, Command};
 use crate::event::{Cmd as WorkerCmd, Event};
 
 fn main() {
-    let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
+    let Ok(rt) = tokio::runtime::Runtime::new() else {
+        eprintln!("fatal: failed to create tokio runtime");
+        return;
+    };
     let _guard = rt.enter();
 
     let cli = Cli::parse();
     let json_mode = cli.command.as_ref().is_some_and(Command::is_json);
 
     if let Err(e) = run(cli) {
-        let _ = tui::restore();
+        drop(tui::restore());
         if json_mode {
             println!("{}", serde_json::json!({"error": e.to_string()}));
         } else {
             eprintln!("fatal: {e}");
         }
-        process::exit(1);
     }
 }
 

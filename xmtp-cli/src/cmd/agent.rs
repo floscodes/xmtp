@@ -30,9 +30,9 @@ enum StreamEvent {
 fn emit(value: &Value) {
     let stdout = io::stdout();
     let mut out = stdout.lock();
-    let _ = serde_json::to_writer(&mut out, value);
-    let _ = writeln!(out);
-    let _ = out.flush();
+    drop(serde_json::to_writer(&mut out, value));
+    drop(writeln!(out));
+    drop(out.flush());
 }
 
 const fn conv_type_str(t: Option<ConversationType>) -> &'static str {
@@ -71,8 +71,8 @@ fn parse_consent(s: &str) -> Option<ConsentState> {
 /// `xmtp conversations [--consent STATE] [--json]`
 pub(crate) fn conversations(profile: &str, consent: Option<&str>, json: bool) -> xmtp::Result<()> {
     let (_, client) = config::open_client(profile)?;
-    let _ = client.sync_welcomes();
-    let _ = client.sync_all(&[]);
+    drop(client.sync_welcomes());
+    drop(client.sync_all(&[]));
 
     let consent_states = match consent {
         Some(s) => {
@@ -131,7 +131,7 @@ pub(crate) fn messages(
     json: bool,
 ) -> xmtp::Result<()> {
     let (_, client) = config::open_client(profile)?;
-    let _ = client.sync_all(&[]);
+    drop(client.sync_all(&[]));
 
     let conv = client.conversation(conv_id)?.ok_or_else(|| {
         xmtp::XmtpError::InvalidArgument(format!("conversation not found: {conv_id}"))
@@ -139,7 +139,7 @@ pub(crate) fn messages(
 
     let opts = ListMessagesOptions {
         direction: Some(SortDirection::Ascending),
-        #[allow(clippy::cast_possible_wrap)]
+        #[allow(clippy::cast_possible_wrap, reason = "CLI limit value fits in i64")]
         limit: limit.map_or(0, |l| l as i64),
         ..Default::default()
     };
@@ -208,7 +208,7 @@ pub(crate) fn send(
 /// `xmtp dm <address> [--json]`
 pub(crate) fn dm(profile: &str, address: &str, json: bool) -> xmtp::Result<()> {
     let (_, client) = config::open_client(profile)?;
-    let _ = client.sync_welcomes();
+    drop(client.sync_welcomes());
 
     let recipient = Recipient::parse(address);
     let conv = client.dm(&recipient)?;
@@ -234,7 +234,7 @@ pub(crate) fn create_group(
     json: bool,
 ) -> xmtp::Result<()> {
     let (_, client) = config::open_client(profile)?;
-    let _ = client.sync_welcomes();
+    drop(client.sync_welcomes());
 
     let members: Vec<Recipient> = member_addrs.iter().map(|s| Recipient::parse(s)).collect();
     let opts = CreateGroupOptions {
@@ -355,8 +355,8 @@ pub(crate) fn request(profile: &str, conv_id: &str, action: &str, json: bool) ->
 /// Outputs NDJSON events to stdout. Runs until interrupted.
 pub(crate) fn stream_events(profile: &str, kind: &str) -> xmtp::Result<()> {
     let (_, client) = config::open_client(profile)?;
-    let _ = client.sync_welcomes();
-    let _ = client.sync_all(&[]);
+    drop(client.sync_welcomes());
+    drop(client.sync_all(&[]));
 
     let (tx, rx) = std::sync::mpsc::channel::<StreamEvent>();
     let stream_msgs = kind == "messages" || kind == "all";
@@ -371,37 +371,13 @@ pub(crate) fn stream_events(profile: &str, kind: &str) -> xmtp::Result<()> {
     if stream_msgs {
         let sub = stream::messages(&client, None, &[])?;
         let tx_msg = tx.clone();
-        std::thread::spawn(move || {
-            for ev in sub {
-                if tx_msg
-                    .send(StreamEvent::Message {
-                        msg_id: ev.message_id,
-                    })
-                    .is_err()
-                {
-                    break;
-                }
-            }
-        });
+        std::thread::spawn(move || pipe_messages(sub, &tx_msg));
     }
 
     if stream_convs {
         let sub = stream::conversations(&client, None)?;
         let tx_conv = tx.clone();
-        std::thread::spawn(move || {
-            for conv in sub {
-                if tx_conv
-                    .send(StreamEvent::Conversation {
-                        id: conv.id(),
-                        conv_type: conv.conversation_type(),
-                        name: conv.name(),
-                    })
-                    .is_err()
-                {
-                    break;
-                }
-            }
-        });
+        std::thread::spawn(move || pipe_conversations(sub, &tx_conv));
     }
 
     drop(tx);
@@ -428,7 +404,7 @@ pub(crate) fn stream_events(profile: &str, kind: &str) -> xmtp::Result<()> {
                 conv_type,
                 name,
             } => {
-                let _ = client.sync_welcomes();
+                drop(client.sync_welcomes());
                 emit(&json!({
                     "type": "conversation",
                     "conversation_id": id,
@@ -439,4 +415,38 @@ pub(crate) fn stream_events(profile: &str, kind: &str) -> xmtp::Result<()> {
         }
     }
     Ok(())
+}
+
+fn pipe_messages(
+    sub: stream::Subscription<stream::MessageEvent>,
+    tx: &std::sync::mpsc::Sender<StreamEvent>,
+) {
+    for ev in sub {
+        if tx
+            .send(StreamEvent::Message {
+                msg_id: ev.message_id,
+            })
+            .is_err()
+        {
+            break;
+        }
+    }
+}
+
+fn pipe_conversations(
+    sub: stream::Subscription<xmtp::Conversation>,
+    tx: &std::sync::mpsc::Sender<StreamEvent>,
+) {
+    for conv in sub {
+        if tx
+            .send(StreamEvent::Conversation {
+                id: conv.id(),
+                conv_type: conv.conversation_type(),
+                name: conv.name(),
+            })
+            .is_err()
+        {
+            break;
+        }
+    }
 }

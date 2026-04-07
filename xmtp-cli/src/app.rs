@@ -66,7 +66,7 @@ pub(crate) struct App {
     pub active_id: Option<String>,
     pub messages: Vec<Message>,
     /// `inbox_id` → display address for the active conversation.
-    pub address_map: std::collections::HashMap<String, String>,
+    pub address_map: std::collections::BTreeMap<String, String>,
     pub members: Vec<MemberEntry>,
     pub member_idx: usize,
     pub group_desc: String,
@@ -105,7 +105,7 @@ impl App {
             hidden: Vec::new(),
             active_id: None,
             messages: Vec::new(),
-            address_map: std::collections::HashMap::new(),
+            address_map: std::collections::BTreeMap::new(),
             members: Vec::new(),
             member_idx: 0,
             group_desc: String::new(),
@@ -148,8 +148,22 @@ impl App {
         }
     }
 
+    fn apply_preview(
+        list: &mut [ConvEntry],
+        conv_id: &str,
+        text: &str,
+        time_ns: i64,
+        unread: bool,
+    ) {
+        for e in list.iter_mut().filter(|e| e.id == conv_id) {
+            text.clone_into(&mut e.preview);
+            e.last_ns = time_ns;
+            e.unread |= unread;
+        }
+    }
+
     fn cmd(&self, c: Cmd) {
-        let _ = self.cmd.send(c);
+        drop(self.cmd.send(c));
     }
 
     /// Apply a worker result event. Called from the main loop.
@@ -193,15 +207,7 @@ impl App {
                 unread,
             } => {
                 for list in [&mut self.inbox, &mut self.requests, &mut self.hidden] {
-                    for e in list.iter_mut() {
-                        if e.id == conv_id {
-                            e.preview.clone_from(&text);
-                            e.last_ns = time_ns;
-                            if unread {
-                                e.unread = true;
-                            }
-                        }
-                    }
+                    Self::apply_preview(list, &conv_id, &text, time_ns, unread);
                 }
             }
             Event::Members { members, info } => {
@@ -307,18 +313,7 @@ impl App {
             }
             // Consent: deny/hide (Inbox + Requests tabs).
             KeyCode::Char('x') if self.tab == Tab::Inbox || self.tab == Tab::Requests => {
-                if let Some(e) = self.sidebar().get(self.sidebar_idx) {
-                    let id = e.id.clone();
-                    if self.tab == Tab::Inbox && self.active_id.as_deref() == Some(&id) {
-                        self.active_id = None;
-                        self.messages.clear();
-                        self.scroll = 0;
-                    }
-                    self.cmd(Cmd::SetConsent {
-                        id,
-                        state: ConsentState::Denied,
-                    });
-                }
+                self.deny_selected();
             }
             // Consent: undo (Hidden → Unknown).
             KeyCode::Char('u') if self.tab == Tab::Hidden => {
@@ -399,48 +394,48 @@ impl App {
                 Prompt::AddMember | Prompt::Edit(_) => self.back_to_members(),
                 _ => self.close_prompt(),
             },
-            KeyCode::Enter => {
-                let text = self.input.trim().to_owned();
-                match prompt {
-                    Prompt::Dm => {
-                        if text.is_empty() {
-                            self.close_prompt();
-                        } else {
-                            self.cmd(Cmd::CreateDm(text));
-                            self.close_prompt();
-                            self.flash("Creating DM…");
-                        }
-                    }
-                    Prompt::GroupName => {
-                        self.group_name = if text.is_empty() { None } else { Some(text) };
-                        self.input.clear();
-                        self.cursor = 0;
-                        self.mode = Mode::Prompt(Prompt::GroupMembers);
-                        self.refresh_hint();
-                    }
-                    Prompt::GroupMembers => {
-                        if !text.is_empty() && !self.group_members.contains(&text) {
-                            self.group_members.push(text);
-                        }
-                        self.input.clear();
-                        self.cursor = 0;
-                        self.refresh_hint();
-                    }
-                    Prompt::AddMember => {
-                        if !text.is_empty() {
-                            self.cmd(Cmd::AddMember(text));
-                        }
-                        self.back_to_members();
-                    }
-                    Prompt::Edit(field) => {
-                        if !text.is_empty() {
-                            self.cmd(Cmd::SetGroupMeta { field, value: text });
-                        }
-                        self.back_to_members();
-                    }
-                }
-            }
+            KeyCode::Enter => self.submit_prompt(prompt),
             _ => self.edit_input(key.code),
+        }
+    }
+
+    fn submit_prompt(&mut self, prompt: Prompt) {
+        let text = self.input.trim().to_owned();
+        match prompt {
+            Prompt::Dm => {
+                if !text.is_empty() {
+                    self.cmd(Cmd::CreateDm(text));
+                    self.flash("Creating DM…");
+                }
+                self.close_prompt();
+            }
+            Prompt::GroupName => {
+                self.group_name = if text.is_empty() { None } else { Some(text) };
+                self.input.clear();
+                self.cursor = 0;
+                self.mode = Mode::Prompt(Prompt::GroupMembers);
+                self.refresh_hint();
+            }
+            Prompt::GroupMembers => {
+                if !text.is_empty() && !self.group_members.contains(&text) {
+                    self.group_members.push(text);
+                }
+                self.input.clear();
+                self.cursor = 0;
+                self.refresh_hint();
+            }
+            Prompt::AddMember => {
+                if !text.is_empty() {
+                    self.cmd(Cmd::AddMember(text));
+                }
+                self.back_to_members();
+            }
+            Prompt::Edit(field) => {
+                if !text.is_empty() {
+                    self.cmd(Cmd::SetGroupMeta { field, value: text });
+                }
+                self.back_to_members();
+            }
         }
     }
 
@@ -543,14 +538,13 @@ impl App {
                 }
             }
             KeyCode::Enter => {
-                if let Some(row) = self.permissions.get(self.perm_idx) {
-                    let new_policy = next_policy(row.policy);
+                if let Some(row) = self.permissions.get_mut(self.perm_idx) {
+                    row.policy = next_policy(row.policy);
                     let cmd = Cmd::SetPermission {
                         update_type: row.update_type,
-                        policy: new_policy,
+                        policy: row.policy,
                         metadata_field: row.metadata_field,
                     };
-                    self.permissions[self.perm_idx].policy = new_policy;
                     self.cmd(cmd);
                 }
             }
@@ -594,6 +588,22 @@ impl App {
         self.cursor = 0;
         self.mode = Mode::Prompt(prompt);
         self.refresh_hint();
+    }
+
+    fn deny_selected(&mut self) {
+        let Some(e) = self.sidebar().get(self.sidebar_idx) else {
+            return;
+        };
+        let id = e.id.clone();
+        if self.tab == Tab::Inbox && self.active_id.as_deref() == Some(&id) {
+            self.active_id = None;
+            self.messages.clear();
+            self.scroll = 0;
+        }
+        self.cmd(Cmd::SetConsent {
+            id,
+            state: ConsentState::Denied,
+        });
     }
 
     fn nav(&mut self, delta: i32) {

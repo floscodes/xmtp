@@ -84,7 +84,7 @@ pub(crate) enum Event {
         conv_id: String,
         msgs: Vec<Message>,
         /// `inbox_id` → display address, for resolving sender identities.
-        address_map: std::collections::HashMap<String, String>,
+        address_map: std::collections::BTreeMap<String, String>,
     },
     /// Worker: single sidebar preview updated.
     Preview {
