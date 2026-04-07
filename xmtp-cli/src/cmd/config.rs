@@ -6,33 +6,33 @@ use std::{fmt, fs};
 use xmtp::{AlloySigner, Client, EnsResolver, Env, IdentifierKind, LedgerSigner, Signer};
 
 /// Base data directory for all profiles.
-pub fn data_dir() -> PathBuf {
+pub(crate) fn data_dir() -> PathBuf {
     dirs::data_dir()
         .unwrap_or_else(|| PathBuf::from("."))
         .join("xmtp-cli")
 }
 
 /// Data directory for a specific profile.
-pub fn profile_dir(name: &str) -> PathBuf {
+pub(crate) fn profile_dir(name: &str) -> PathBuf {
     data_dir().join(name)
 }
 
 /// Read the default profile name (falls back to `"default"`).
-pub fn default_profile() -> String {
+pub(crate) fn default_profile() -> String {
     let path = data_dir().join(".default");
     fs::read_to_string(path).map_or_else(|_| "default".into(), |s| s.trim().to_owned())
 }
 
 /// Persist the default profile name.
-pub fn set_default(name: &str) -> xmtp::Result<()> {
+pub(crate) fn set_default(name: &str) -> xmtp::Result<()> {
     let base = data_dir();
-    fs::create_dir_all(&base).map_err(|e| xmtp::Error::Ffi(format!("mkdir: {e}")))?;
-    fs::write(base.join(".default"), name).map_err(|e| xmtp::Error::Ffi(format!("write: {e}")))
+    fs::create_dir_all(&base).map_err(|e| xmtp::XmtpError::Ffi(format!("mkdir: {e}")))?;
+    fs::write(base.join(".default"), name).map_err(|e| xmtp::XmtpError::Ffi(format!("write: {e}")))
 }
 
 /// How a profile signs messages.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SignerKind {
+pub(crate) enum SignerKind {
     /// Local key file (`identity.key`).
     File,
     /// Ledger hardware wallet with account index.
@@ -50,7 +50,7 @@ impl fmt::Display for SignerKind {
 
 /// Persistent per-profile configuration stored as `profile.conf`.
 #[derive(Debug, Clone)]
-pub struct ProfileConfig {
+pub(crate) struct ProfileConfig {
     pub env: Env,
     pub rpc_url: String,
     pub signer: SignerKind,
@@ -60,10 +60,10 @@ pub struct ProfileConfig {
 
 impl ProfileConfig {
     /// Load from `<profile_dir>/profile.conf`.
-    pub fn load(profile: &str) -> xmtp::Result<Self> {
+    pub(crate) fn load(profile: &str) -> xmtp::Result<Self> {
         let path = profile_dir(profile).join("profile.conf");
-        let text =
-            fs::read_to_string(&path).map_err(|e| xmtp::Error::Ffi(format!("load config: {e}")))?;
+        let text = fs::read_to_string(&path)
+            .map_err(|e| xmtp::XmtpError::Ffi(format!("load config: {e}")))?;
 
         let mut env = Env::Dev;
         let mut rpc_url = String::from("https://eth.llamarpc.com");
@@ -74,7 +74,7 @@ impl ProfileConfig {
             if let Some((k, v)) = line.trim().split_once('=') {
                 match k.trim() {
                     "env" => {
-                        env = super::parse_env(v.trim()).map_err(xmtp::Error::Ffi)?;
+                        env = super::parse_env(v.trim()).map_err(xmtp::XmtpError::Ffi)?;
                     }
                     "rpc_url" => v.trim().clone_into(&mut rpc_url),
                     "signer" => {
@@ -104,9 +104,9 @@ impl ProfileConfig {
     }
 
     /// Save to `<profile_dir>/profile.conf`.
-    pub fn save(&self, profile: &str) -> xmtp::Result<()> {
+    pub(crate) fn save(&self, profile: &str) -> xmtp::Result<()> {
         let dir = profile_dir(profile);
-        fs::create_dir_all(&dir).map_err(|e| xmtp::Error::Ffi(format!("mkdir: {e}")))?;
+        fs::create_dir_all(&dir).map_err(|e| xmtp::XmtpError::Ffi(format!("mkdir: {e}")))?;
         let content = format!(
             "env={}\nrpc_url={}\nsigner={}\naddress={}\n",
             env_name(self.env),
@@ -115,7 +115,7 @@ impl ProfileConfig {
             self.address,
         );
         fs::write(dir.join("profile.conf"), content)
-            .map_err(|e| xmtp::Error::Ffi(format!("write config: {e}")))
+            .map_err(|e| xmtp::XmtpError::Ffi(format!("write config: {e}")))
     }
 }
 
@@ -123,7 +123,7 @@ impl ProfileConfig {
 ///
 /// If the profile was created before the `address` field existed, falls back
 /// to signer-based opening once to discover and persist the address.
-pub fn open_client(profile: &str) -> xmtp::Result<(ProfileConfig, Client)> {
+pub(crate) fn open_client(profile: &str) -> xmtp::Result<(ProfileConfig, Client)> {
     let cfg = ProfileConfig::load(profile)?;
 
     if cfg.address.is_empty() {
@@ -140,17 +140,19 @@ pub fn open_client(profile: &str) -> xmtp::Result<(ProfileConfig, Client)> {
 }
 
 /// Open a profile with a signer (for operations that need signing, e.g. revoke).
-pub fn open_with_signer(profile: &str) -> xmtp::Result<(ProfileConfig, Box<dyn Signer>, Client)> {
+pub(crate) fn open_with_signer(
+    profile: &str,
+) -> xmtp::Result<(ProfileConfig, Box<dyn Signer>, Client)> {
     let cfg = ProfileConfig::load(profile)?;
     let dir = profile_dir(profile);
 
     let signer: Box<dyn Signer> = match cfg.signer {
         SignerKind::File => {
             let bytes = fs::read(dir.join("identity.key"))
-                .map_err(|e| xmtp::Error::Ffi(format!("read key: {e}")))?;
+                .map_err(|e| xmtp::XmtpError::Ffi(format!("read key: {e}")))?;
             let key: [u8; 32] = bytes
                 .try_into()
-                .map_err(|_| xmtp::Error::InvalidArgument("key must be 32 bytes".into()))?;
+                .map_err(|_| xmtp::XmtpError::InvalidArgument("key must be 32 bytes".into()))?;
             Box::new(AlloySigner::from_bytes(&key)?)
         }
         SignerKind::Ledger(index) => {
@@ -168,7 +170,7 @@ pub fn open_with_signer(profile: &str) -> xmtp::Result<(ProfileConfig, Box<dyn S
 ///
 /// When `signer` is `Some`, uses `build(signer)` which may register.
 /// When `None`, uses `build_existing()` with the stored address (no signing).
-pub fn build_client(
+pub(crate) fn build_client(
     cfg: &ProfileConfig,
     db_path: &str,
     signer: Option<&dyn Signer>,
@@ -197,7 +199,7 @@ pub fn build_client(
 }
 
 /// Human-readable environment name.
-pub const fn env_name(env: Env) -> &'static str {
+pub(crate) const fn env_name(env: Env) -> &'static str {
     match env {
         Env::Dev => "dev",
         Env::Production => "production",

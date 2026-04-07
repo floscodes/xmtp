@@ -43,7 +43,7 @@ const CURSOR_BG: Color = Color::Rgb(140, 140, 150);
 const PLACEHOLDER: Color = Color::Rgb(75, 75, 85);
 
 /// Render the full application UI.
-pub fn render(app: &mut App, frame: &mut Frame<'_>) {
+pub(crate) fn render(app: &mut App, frame: &mut Frame<'_>) {
     let area = frame.area();
     let rows = Layout::default()
         .direction(Direction::Vertical)

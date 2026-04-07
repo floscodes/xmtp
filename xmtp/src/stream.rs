@@ -1,4 +1,7 @@
-#![allow(unsafe_code)]
+#![allow(
+    unsafe_code,
+    reason = "Streaming callbacks require unsafe for FFI trampoline functions and raw pointer casts"
+)]
 //! Channel-based streaming for real-time event subscriptions.
 //!
 //! Each function returns a [`Subscription<T>`] that yields typed events via
@@ -41,12 +44,14 @@ impl<T> Subscription<T> {
 
     /// Signal the stream to stop. Safe to call multiple times.
     pub fn close(&self) {
+        // SAFETY: `self.handle` is a valid stream handle; safe to call multiple times.
         unsafe { xmtp_sys::xmtp_stream_end(self.handle.as_ptr()) };
     }
 
     /// Whether the stream has finished.
     #[must_use]
     pub fn is_closed(&self) -> bool {
+        // SAFETY: `self.handle` is a valid stream handle.
         unsafe { xmtp_sys::xmtp_stream_is_closed(self.handle.as_ptr()) == 1 }
     }
 }
@@ -61,6 +66,7 @@ impl<T> Iterator for Subscription<T> {
 impl<T> Drop for Subscription<T> {
     fn drop(&mut self) {
         // Signal the FFI stream to stop before OwnedHandle frees the resource.
+        // SAFETY: `self.handle` is a valid stream handle; safe to call multiple times.
         unsafe { xmtp_sys::xmtp_stream_end(self.handle.as_ptr()) };
     }
 }
@@ -118,10 +124,12 @@ fn subscribe<T: Send + 'static, F: Send + 'static>(
     let rc = start(ctx_ptr, &raw mut out);
     if rc != 0 {
         // Reclaim the context to avoid a leak on error.
+        // SAFETY: Reclaiming the context box to avoid a leak; `ctx_ptr` was created via `Box::into_raw`.
         let _ = unsafe { Box::from_raw(ctx_ptr.cast::<F>()) };
         return Err(error::last_ffi_error());
     }
     let handle = OwnedHandle::new(out, xmtp_sys::xmtp_stream_free)?;
+    // SAFETY: `ctx_ptr` was created via `Box::into_raw` and the FFI layer no longer owns it.
     let ctx_box = unsafe { Box::from_raw(ctx_ptr.cast::<F>()) };
     Ok(Subscription {
         rx,
@@ -141,8 +149,9 @@ pub fn conversations(
     let client_ptr = client.handle.as_ptr();
     let conv_type = conversation_type.map_or(-1, |t| t as i32);
     let cb: Box<dyn Fn(Conversation) + Send> = Box::new(move |conv| {
-        let _ = tx.send(conv);
+        drop(tx.send(conv));
     });
+    // SAFETY: Valid client pointer and callback context; `out` receives the stream handle.
     subscribe(cb, rx, |ctx, out| unsafe {
         xmtp_sys::xmtp_stream_conversations(
             client_ptr,
@@ -174,11 +183,12 @@ pub fn messages(
     };
     let cs_len = to_ffi_len(cs.len())?;
     let cb: Box<dyn Fn(String, String) + Send> = Box::new(move |mid, cid| {
-        let _ = tx.send(MessageEvent {
+        drop(tx.send(MessageEvent {
             message_id: mid,
             conversation_id: cid,
-        });
+        }));
     });
+    // SAFETY: Valid client pointer, consent arrays, and callback context.
     subscribe(cb, rx, |ctx, out| unsafe {
         xmtp_sys::xmtp_stream_all_messages(
             client_ptr,
@@ -198,11 +208,12 @@ pub fn conversation_messages(conversation: &Conversation) -> Result<Subscription
     let (tx, rx) = mpsc::channel();
     let conv_ptr = conversation.handle_ptr();
     let cb: Box<dyn Fn(String, String) + Send> = Box::new(move |mid, cid| {
-        let _ = tx.send(MessageEvent {
+        drop(tx.send(MessageEvent {
             message_id: mid,
             conversation_id: cid,
-        });
+        }));
     });
+    // SAFETY: Valid conversation pointer and callback context.
     subscribe(cb, rx, |ctx, out| unsafe {
         xmtp_sys::xmtp_conversation_stream_messages(conv_ptr, Some(msg_trampoline), None, ctx, out)
     })
@@ -213,8 +224,9 @@ pub fn consent(client: &Client) -> Result<Subscription<Vec<ConsentUpdate>>> {
     let (tx, rx) = mpsc::channel();
     let client_ptr = client.handle.as_ptr();
     let cb: Box<dyn Fn(Vec<ConsentUpdate>) + Send> = Box::new(move |updates| {
-        let _ = tx.send(updates);
+        drop(tx.send(updates));
     });
+    // SAFETY: Valid client pointer and callback context.
     subscribe(cb, rx, |ctx, out| unsafe {
         xmtp_sys::xmtp_stream_consent(client_ptr, Some(consent_trampoline), None, ctx, out)
     })
@@ -225,8 +237,9 @@ pub fn preferences(client: &Client) -> Result<Subscription<Vec<PreferenceUpdate>
     let (tx, rx) = mpsc::channel();
     let client_ptr = client.handle.as_ptr();
     let cb: Box<dyn Fn(Vec<PreferenceUpdate>) + Send> = Box::new(move |updates| {
-        let _ = tx.send(updates);
+        drop(tx.send(updates));
     });
+    // SAFETY: Valid client pointer and callback context.
     subscribe(cb, rx, |ctx, out| unsafe {
         xmtp_sys::xmtp_stream_preferences(client_ptr, Some(pref_trampoline), None, ctx, out)
     })
@@ -237,8 +250,9 @@ pub fn message_deletions(client: &Client) -> Result<Subscription<String>> {
     let (tx, rx) = mpsc::channel();
     let client_ptr = client.handle.as_ptr();
     let cb: Box<dyn Fn(String) + Send> = Box::new(move |id| {
-        let _ = tx.send(id);
+        drop(tx.send(id));
     });
+    // SAFETY: Valid client pointer and callback context.
     subscribe(cb, rx, |ctx, out| unsafe {
         xmtp_sys::xmtp_stream_message_deletions(
             client_ptr,
@@ -254,53 +268,58 @@ unsafe extern "C" fn conv_trampoline(
     conv: *mut xmtp_sys::XmtpFfiConversation,
     context: *mut c_void,
 ) {
-    unsafe {
-        if context.is_null() || conv.is_null() {
-            return;
-        }
-        let cb = &*context.cast::<Box<dyn Fn(Conversation) + Send>>();
-        if let Ok(c) = Conversation::from_raw(conv) {
-            cb(c);
-        }
+    if context.is_null() || conv.is_null() {
+        return;
+    }
+    // SAFETY: `context` is a `Box<Box<dyn Fn(Conversation) + Send>>` created by `subscribe`.
+    let cb = unsafe { &*context.cast::<Box<dyn Fn(Conversation) + Send>>() };
+    if let Ok(c) = Conversation::from_raw(conv) {
+        cb(c);
     }
 }
 
 unsafe extern "C" fn msg_trampoline(msg: *mut xmtp_sys::XmtpFfiMessage, context: *mut c_void) {
-    unsafe {
-        if context.is_null() || msg.is_null() {
-            if !msg.is_null() {
-                xmtp_sys::xmtp_message_free(msg);
-            }
-            return;
+    if context.is_null() || msg.is_null() {
+        if !msg.is_null() {
+            // SAFETY: `msg` is an FFI-allocated message that must be freed.
+            unsafe { xmtp_sys::xmtp_message_free(msg) };
         }
-        // Extract message ID and group ID before freeing.
-        let id_ptr = xmtp_sys::xmtp_single_message_id(msg);
-        let gid_ptr = xmtp_sys::xmtp_single_message_group_id(msg);
-        xmtp_sys::xmtp_message_free(msg);
-
-        let cb = &*context.cast::<Box<dyn Fn(String, String) + Send>>();
-        let id = if id_ptr.is_null() {
-            String::new()
-        } else {
-            let s = CStr::from_ptr(id_ptr)
-                .to_str()
-                .unwrap_or_default()
-                .to_owned();
-            xmtp_sys::xmtp_free_string(id_ptr);
-            s
-        };
-        let gid = if gid_ptr.is_null() {
-            String::new()
-        } else {
-            let s = CStr::from_ptr(gid_ptr)
-                .to_str()
-                .unwrap_or_default()
-                .to_owned();
-            xmtp_sys::xmtp_free_string(gid_ptr);
-            s
-        };
-        cb(id, gid);
+        return;
     }
+    // SAFETY: Extract message ID before freeing.
+    let id_ptr = unsafe { xmtp_sys::xmtp_single_message_id(msg) };
+    // SAFETY: Extract group ID before freeing.
+    let gid_ptr = unsafe { xmtp_sys::xmtp_single_message_group_id(msg) };
+    // SAFETY: `msg` is an FFI-allocated message that must be freed.
+    unsafe { xmtp_sys::xmtp_message_free(msg) };
+
+    // SAFETY: `context` is a `Box<Box<dyn Fn(String, String) + Send>>` created by `subscribe`.
+    let cb = unsafe { &*context.cast::<Box<dyn Fn(String, String) + Send>>() };
+    let id = if id_ptr.is_null() {
+        String::new()
+    } else {
+        // SAFETY: `id_ptr` is a valid NUL-terminated C string.
+        let s = unsafe { CStr::from_ptr(id_ptr) }
+            .to_str()
+            .unwrap_or_default()
+            .to_owned();
+        // SAFETY: `id_ptr` was allocated by the FFI layer.
+        unsafe { xmtp_sys::xmtp_free_string(id_ptr) };
+        s
+    };
+    let gid = if gid_ptr.is_null() {
+        String::new()
+    } else {
+        // SAFETY: `gid_ptr` is a valid NUL-terminated C string.
+        let s = unsafe { CStr::from_ptr(gid_ptr) }
+            .to_str()
+            .unwrap_or_default()
+            .to_owned();
+        // SAFETY: `gid_ptr` was allocated by the FFI layer.
+        unsafe { xmtp_sys::xmtp_free_string(gid_ptr) };
+        s
+    };
+    cb(id, gid);
 }
 
 unsafe extern "C" fn consent_trampoline(
@@ -308,28 +327,32 @@ unsafe extern "C" fn consent_trampoline(
     count: i32,
     context: *mut c_void,
 ) {
-    unsafe {
-        if context.is_null() || records.is_null() || count <= 0 {
-            return;
-        }
-        let cb = &*context.cast::<Box<dyn Fn(Vec<ConsentUpdate>) + Send>>();
-        let slice = std::slice::from_raw_parts(records, count.unsigned_abs() as usize);
-        let updates: Vec<ConsentUpdate> = slice
-            .iter()
-            .filter_map(|r| {
-                let entity_type = ConsentEntityType::from_ffi(r.entity_type as i32)?;
-                let state = ConsentState::from_ffi(r.state as i32)?;
-                let entity = CStr::from_ptr(r.entity).to_str().ok()?.to_owned();
-                Some(ConsentUpdate {
-                    entity_type,
-                    state,
-                    entity,
-                })
+    if context.is_null() || records.is_null() || count <= 0 {
+        return;
+    }
+    // SAFETY: `context` is a `Box<Box<dyn Fn(Vec<ConsentUpdate>) + Send>>` created by `subscribe`.
+    let cb = unsafe { &*context.cast::<Box<dyn Fn(Vec<ConsentUpdate>) + Send>>() };
+    // SAFETY: `records` points to `count` valid consent records.
+    let slice = unsafe { std::slice::from_raw_parts(records, count.unsigned_abs() as usize) };
+    let updates: Vec<ConsentUpdate> = slice
+        .iter()
+        .filter_map(|r| {
+            let entity_type = ConsentEntityType::from_ffi(r.entity_type as i32)?;
+            let state = ConsentState::from_ffi(r.state as i32)?;
+            // SAFETY: `r.entity` is a valid NUL-terminated C string.
+            let entity = unsafe { CStr::from_ptr(r.entity) }
+                .to_str()
+                .ok()?
+                .to_owned();
+            Some(ConsentUpdate {
+                entity_type,
+                state,
+                entity,
             })
-            .collect();
-        if !updates.is_empty() {
-            cb(updates);
-        }
+        })
+        .collect();
+    if !updates.is_empty() {
+        cb(updates);
     }
 }
 
@@ -338,43 +361,43 @@ unsafe extern "C" fn pref_trampoline(
     count: i32,
     context: *mut c_void,
 ) {
-    unsafe {
-        if context.is_null() || updates.is_null() || count <= 0 {
-            return;
-        }
-        let cb = &*context.cast::<Box<dyn Fn(Vec<PreferenceUpdate>) + Send>>();
-        let slice = std::slice::from_raw_parts(updates, count.unsigned_abs() as usize);
-        let items: Vec<PreferenceUpdate> = slice
-            .iter()
-            .map(|u| {
-                let kind = u.kind as i32;
-                let consent = if kind == 0 {
-                    // Consent update — extract from the embedded record.
-                    let r = &u.consent;
-                    let et = ConsentEntityType::from_ffi(r.entity_type as i32);
-                    let st = ConsentState::from_ffi(r.state as i32);
-                    let entity = if r.entity.is_null() {
-                        String::new()
-                    } else {
-                        CStr::from_ptr(r.entity)
-                            .to_str()
-                            .unwrap_or_default()
-                            .to_owned()
-                    };
-                    et.zip(st).map(|(entity_type, state)| ConsentUpdate {
-                        entity_type,
-                        state,
-                        entity,
-                    })
+    if context.is_null() || updates.is_null() || count <= 0 {
+        return;
+    }
+    // SAFETY: `context` is a `Box<Box<dyn Fn(Vec<PreferenceUpdate>) + Send>>` created by `subscribe`.
+    let cb = unsafe { &*context.cast::<Box<dyn Fn(Vec<PreferenceUpdate>) + Send>>() };
+    // SAFETY: `updates` points to `count` valid preference records.
+    let slice = unsafe { std::slice::from_raw_parts(updates, count.unsigned_abs() as usize) };
+    let items: Vec<PreferenceUpdate> = slice
+        .iter()
+        .map(|u| {
+            let kind = u.kind as i32;
+            let consent = if kind == 0 {
+                let r = &u.consent;
+                let et = ConsentEntityType::from_ffi(r.entity_type as i32);
+                let st = ConsentState::from_ffi(r.state as i32);
+                let entity = if r.entity.is_null() {
+                    String::new()
                 } else {
-                    None
+                    // SAFETY: `r.entity` is a valid NUL-terminated C string.
+                    unsafe { CStr::from_ptr(r.entity) }
+                        .to_str()
+                        .unwrap_or_default()
+                        .to_owned()
                 };
-                PreferenceUpdate { kind, consent }
-            })
-            .collect();
-        if !items.is_empty() {
-            cb(items);
-        }
+                et.zip(st).map(|(entity_type, state)| ConsentUpdate {
+                    entity_type,
+                    state,
+                    entity,
+                })
+            } else {
+                None
+            };
+            PreferenceUpdate { kind, consent }
+        })
+        .collect();
+    if !items.is_empty() {
+        cb(items);
     }
 }
 
@@ -382,13 +405,13 @@ unsafe extern "C" fn deletion_trampoline(
     message_id: *const std::ffi::c_char,
     context: *mut c_void,
 ) {
-    unsafe {
-        if context.is_null() || message_id.is_null() {
-            return;
-        }
-        let cb = &*context.cast::<Box<dyn Fn(String) + Send>>();
-        if let Ok(id) = CStr::from_ptr(message_id).to_str() {
-            cb(id.to_owned());
-        }
+    if context.is_null() || message_id.is_null() {
+        return;
+    }
+    // SAFETY: `context` is a `Box<Box<dyn Fn(String) + Send>>` created by `subscribe`.
+    let cb = unsafe { &*context.cast::<Box<dyn Fn(String) + Send>>() };
+    // SAFETY: `message_id` is a valid NUL-terminated C string.
+    if let Ok(id) = unsafe { CStr::from_ptr(message_id) }.to_str() {
+        cb(id.to_owned());
     }
 }

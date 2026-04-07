@@ -69,7 +69,7 @@ fn parse_consent(s: &str) -> Option<ConsentState> {
 }
 
 /// `xmtp conversations [--consent STATE] [--json]`
-pub fn conversations(profile: &str, consent: Option<&str>, json: bool) -> xmtp::Result<()> {
+pub(crate) fn conversations(profile: &str, consent: Option<&str>, json: bool) -> xmtp::Result<()> {
     let (_, client) = config::open_client(profile)?;
     let _ = client.sync_welcomes();
     let _ = client.sync_all(&[]);
@@ -77,7 +77,7 @@ pub fn conversations(profile: &str, consent: Option<&str>, json: bool) -> xmtp::
     let consent_states = match consent {
         Some(s) => {
             let state = parse_consent(s).ok_or_else(|| {
-                xmtp::Error::InvalidArgument(format!(
+                xmtp::XmtpError::InvalidArgument(format!(
                     "invalid consent state: {s} (expected: allowed, denied, unknown)"
                 ))
             })?;
@@ -124,7 +124,7 @@ pub fn conversations(profile: &str, consent: Option<&str>, json: bool) -> xmtp::
 }
 
 /// `xmtp messages <conv_id> [--limit N] [--json]`
-pub fn messages(
+pub(crate) fn messages(
     profile: &str,
     conv_id: &str,
     limit: Option<usize>,
@@ -134,7 +134,7 @@ pub fn messages(
     let _ = client.sync_all(&[]);
 
     let conv = client.conversation(conv_id)?.ok_or_else(|| {
-        xmtp::Error::InvalidArgument(format!("conversation not found: {conv_id}"))
+        xmtp::XmtpError::InvalidArgument(format!("conversation not found: {conv_id}"))
     })?;
 
     let opts = ListMessagesOptions {
@@ -181,11 +181,17 @@ pub fn messages(
 }
 
 /// `xmtp send <conv_id> <text> [--push] [--json]`
-pub fn send(profile: &str, conv_id: &str, text: &str, push: bool, json: bool) -> xmtp::Result<()> {
+pub(crate) fn send(
+    profile: &str,
+    conv_id: &str,
+    text: &str,
+    push: bool,
+    json: bool,
+) -> xmtp::Result<()> {
     let (_, client) = config::open_client(profile)?;
 
     let conv = client.conversation(conv_id)?.ok_or_else(|| {
-        xmtp::Error::InvalidArgument(format!("conversation not found: {conv_id}"))
+        xmtp::XmtpError::InvalidArgument(format!("conversation not found: {conv_id}"))
     })?;
 
     let opts = SendOptions { should_push: push };
@@ -200,7 +206,7 @@ pub fn send(profile: &str, conv_id: &str, text: &str, push: bool, json: bool) ->
 }
 
 /// `xmtp dm <address> [--json]`
-pub fn dm(profile: &str, address: &str, json: bool) -> xmtp::Result<()> {
+pub(crate) fn dm(profile: &str, address: &str, json: bool) -> xmtp::Result<()> {
     let (_, client) = config::open_client(profile)?;
     let _ = client.sync_welcomes();
 
@@ -221,7 +227,7 @@ pub fn dm(profile: &str, address: &str, json: bool) -> xmtp::Result<()> {
 }
 
 /// `xmtp group <members...> [--name NAME] [--json]`
-pub fn create_group(
+pub(crate) fn create_group(
     profile: &str,
     member_addrs: &[String],
     name: Option<&str>,
@@ -253,11 +259,11 @@ pub fn create_group(
 }
 
 /// `xmtp members <conv_id> [--json]`
-pub fn members(profile: &str, conv_id: &str, json: bool) -> xmtp::Result<()> {
+pub(crate) fn members(profile: &str, conv_id: &str, json: bool) -> xmtp::Result<()> {
     let (_, client) = config::open_client(profile)?;
 
     let conv = client.conversation(conv_id)?.ok_or_else(|| {
-        xmtp::Error::InvalidArgument(format!("conversation not found: {conv_id}"))
+        xmtp::XmtpError::InvalidArgument(format!("conversation not found: {conv_id}"))
     })?;
 
     let members = conv.members()?;
@@ -289,7 +295,7 @@ pub fn members(profile: &str, conv_id: &str, json: bool) -> xmtp::Result<()> {
 }
 
 /// `xmtp can-message <addresses...> [--json]`
-pub fn can_message(profile: &str, addresses: &[String], json: bool) -> xmtp::Result<()> {
+pub(crate) fn can_message(profile: &str, addresses: &[String], json: bool) -> xmtp::Result<()> {
     let (_, client) = config::open_client(profile)?;
 
     let recipients: Vec<Recipient> = addresses.iter().map(|s| Recipient::parse(s)).collect();
@@ -313,18 +319,18 @@ pub fn can_message(profile: &str, addresses: &[String], json: bool) -> xmtp::Res
 }
 
 /// `xmtp request <conv_id> accept|deny [--json]`
-pub fn request(profile: &str, conv_id: &str, action: &str, json: bool) -> xmtp::Result<()> {
+pub(crate) fn request(profile: &str, conv_id: &str, action: &str, json: bool) -> xmtp::Result<()> {
     let (_, client) = config::open_client(profile)?;
 
     let conv = client.conversation(conv_id)?.ok_or_else(|| {
-        xmtp::Error::InvalidArgument(format!("conversation not found: {conv_id}"))
+        xmtp::XmtpError::InvalidArgument(format!("conversation not found: {conv_id}"))
     })?;
 
     let state = match action.to_ascii_lowercase().as_str() {
         "accept" | "allow" => ConsentState::Allowed,
         "deny" | "block" | "hide" => ConsentState::Denied,
         _ => {
-            return Err(xmtp::Error::InvalidArgument(format!(
+            return Err(xmtp::XmtpError::InvalidArgument(format!(
                 "invalid action: {action} (expected: accept, deny)"
             )));
         }
@@ -347,7 +353,7 @@ pub fn request(profile: &str, conv_id: &str, action: &str, json: bool) -> xmtp::
 /// `xmtp stream [messages|conversations|all]`
 ///
 /// Outputs NDJSON events to stdout. Runs until interrupted.
-pub fn stream_events(profile: &str, kind: &str) -> xmtp::Result<()> {
+pub(crate) fn stream_events(profile: &str, kind: &str) -> xmtp::Result<()> {
     let (_, client) = config::open_client(profile)?;
     let _ = client.sync_welcomes();
     let _ = client.sync_all(&[]);
@@ -357,7 +363,7 @@ pub fn stream_events(profile: &str, kind: &str) -> xmtp::Result<()> {
     let stream_convs = kind == "conversations" || kind == "all";
 
     if !stream_msgs && !stream_convs {
-        return Err(xmtp::Error::InvalidArgument(format!(
+        return Err(xmtp::XmtpError::InvalidArgument(format!(
             "invalid stream type: {kind} (expected: messages, conversations, all)"
         )));
     }

@@ -11,7 +11,7 @@ use crate::event::{Cmd, CmdTx, ConvEntry, Event, GroupField, MemberEntry, Permis
 
 /// Active sidebar tab.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Tab {
+pub(crate) enum Tab {
     Inbox,
     Requests,
     Hidden,
@@ -19,14 +19,14 @@ pub enum Tab {
 
 /// Active panel.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Focus {
+pub(crate) enum Focus {
     Sidebar,
     Input,
 }
 
 /// Text-input prompt variant.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Prompt {
+pub(crate) enum Prompt {
     Dm,
     GroupName,
     GroupMembers,
@@ -36,7 +36,7 @@ pub enum Prompt {
 
 /// Interaction mode.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Mode {
+pub(crate) enum Mode {
     Normal,
     Prompt(Prompt),
     Members,
@@ -47,7 +47,7 @@ pub enum Mode {
 const FLASH_TTL: u16 = 60;
 
 /// Central application state. Holds **no FFI handles**.
-pub struct App {
+pub(crate) struct App {
     pub quit: bool,
     pub address: String,
     pub inbox_id: String,
@@ -89,7 +89,7 @@ pub struct App {
 }
 
 impl App {
-    pub fn new(address: String, inbox_id: String, env: String, cmd: CmdTx) -> Self {
+    pub(crate) fn new(address: String, inbox_id: String, env: String, cmd: CmdTx) -> Self {
         Self {
             quit: false,
             address,
@@ -123,7 +123,7 @@ impl App {
     }
 
     /// Current sidebar list.
-    pub fn sidebar(&self) -> &[ConvEntry] {
+    pub(crate) fn sidebar(&self) -> &[ConvEntry] {
         match self.tab {
             Tab::Inbox => &self.inbox,
             Tab::Requests => &self.requests,
@@ -153,7 +153,7 @@ impl App {
     }
 
     /// Apply a worker result event. Called from the main loop.
-    pub fn apply(&mut self, event: Event) {
+    pub(crate) fn apply(&mut self, event: Event) {
         match event {
             Event::Conversations {
                 mut inbox,
@@ -231,7 +231,7 @@ impl App {
         }
     }
 
-    pub fn tick(&mut self) {
+    pub(crate) fn tick(&mut self) {
         if self.status_ttl > 0 {
             self.status_ttl -= 1;
             if self.status_ttl == 0 {
@@ -241,7 +241,7 @@ impl App {
     }
 
     /// Key dispatch — **never blocks**.
-    pub fn handle_key(&mut self, key: KeyEvent) {
+    pub(crate) fn handle_key(&mut self, key: KeyEvent) {
         if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c') {
             self.quit = true;
             return;
@@ -653,11 +653,11 @@ impl App {
         }
     }
 
-    pub const fn scroll_up(&mut self, n: usize) {
+    pub(crate) const fn scroll_up(&mut self, n: usize) {
         self.scroll = self.scroll.saturating_add(n);
     }
 
-    pub const fn scroll_down(&mut self, n: usize) {
+    pub(crate) const fn scroll_down(&mut self, n: usize) {
         self.scroll = self.scroll.saturating_sub(n);
     }
 

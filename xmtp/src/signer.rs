@@ -10,7 +10,7 @@
 use alloy_signer::SignerSync;
 use alloy_signer_local::PrivateKeySigner;
 
-use crate::error::{Error, Result};
+use crate::error::{Result, XmtpError};
 use crate::types::{AccountIdentifier, IdentifierKind, Signer};
 
 /// A local Ethereum private-key signer powered by
@@ -30,12 +30,12 @@ impl AlloySigner {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::Signing`] if the hex string is malformed or does not
+    /// Returns [`XmtpError::Signing`] if the hex string is malformed or does not
     /// represent a valid secp256k1 secret key.
     pub fn from_hex(key: &str) -> Result<Self> {
         let inner: PrivateKeySigner = key
             .parse()
-            .map_err(|e: alloy_signer_local::LocalSignerError| Error::Signing(e.to_string()))?;
+            .map_err(|e: alloy_signer_local::LocalSignerError| XmtpError::Signing(e.to_string()))?;
         Ok(Self { inner })
     }
 
@@ -43,10 +43,11 @@ impl AlloySigner {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::Signing`] if the bytes are not a valid secp256k1
+    /// Returns [`XmtpError::Signing`] if the bytes are not a valid secp256k1
     /// secret key.
     pub fn from_bytes(key: &[u8; 32]) -> Result<Self> {
-        let inner = PrivateKeySigner::from_slice(key).map_err(|e| Error::Signing(e.to_string()))?;
+        let inner =
+            PrivateKeySigner::from_slice(key).map_err(|e| XmtpError::Signing(e.to_string()))?;
         Ok(Self { inner })
     }
 
@@ -90,7 +91,7 @@ impl Signer for AlloySigner {
         let sig = self
             .inner
             .sign_message_sync(text.as_bytes())
-            .map_err(|e| Error::Signing(e.to_string()))?;
+            .map_err(|e| XmtpError::Signing(e.to_string()))?;
         Ok(sig.as_bytes().to_vec())
     }
 }

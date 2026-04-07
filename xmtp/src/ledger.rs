@@ -12,7 +12,7 @@ use alloy_signer::Signer as AlloySigner;
 use alloy_signer_ledger::{HDPath, LedgerSigner as Inner};
 use tokio::runtime::Runtime;
 
-use crate::error::{Error, Result};
+use crate::error::{Result, XmtpError};
 use crate::types::{AccountIdentifier, IdentifierKind, Signer};
 
 /// A Ledger hardware wallet signer powered by
@@ -48,7 +48,7 @@ impl LedgerSigner {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::Signing`] if the device is not connected, locked,
+    /// Returns [`XmtpError::Signing`] if the device is not connected, locked,
     /// or the Ethereum app is not open.
     pub fn new(account_index: usize) -> Result<Self> {
         Self::with_hd_path(HDPath::LedgerLive(account_index))
@@ -59,7 +59,7 @@ impl LedgerSigner {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::Signing`] if the device is not connected or
+    /// Returns [`XmtpError::Signing`] if the device is not connected or
     /// unavailable.
     pub fn legacy(account_index: usize) -> Result<Self> {
         Self::with_hd_path(HDPath::Legacy(account_index))
@@ -69,16 +69,16 @@ impl LedgerSigner {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::Signing`] if the device is not connected or
+    /// Returns [`XmtpError::Signing`] if the device is not connected or
     /// unavailable.
     pub fn with_hd_path(hd_path: HDPath) -> Result<Self> {
         let rt = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
-            .map_err(|e| Error::Signing(e.to_string()))?;
+            .map_err(|e| XmtpError::Signing(e.to_string()))?;
         let inner = rt
             .block_on(Inner::new(hd_path, None))
-            .map_err(|e| Error::Signing(e.to_string()))?;
+            .map_err(|e| XmtpError::Signing(e.to_string()))?;
         Ok(Self { inner, rt })
     }
 
@@ -92,12 +92,12 @@ impl LedgerSigner {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::Signing`] if the device communication fails.
+    /// Returns [`XmtpError::Signing`] if the device communication fails.
     pub fn version(&self) -> Result<String> {
         let ver = self
             .rt
             .block_on(self.inner.version())
-            .map_err(|e| Error::Signing(e.to_string()))?;
+            .map_err(|e| XmtpError::Signing(e.to_string()))?;
         Ok(ver.to_string())
     }
 }
@@ -116,7 +116,7 @@ impl Signer for LedgerSigner {
         let sig = self
             .rt
             .block_on(fut)
-            .map_err(|e| Error::Signing(e.to_string()))?;
+            .map_err(|e| XmtpError::Signing(e.to_string()))?;
         Ok(sig.as_bytes().to_vec())
     }
 }

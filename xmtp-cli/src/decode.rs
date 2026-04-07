@@ -12,7 +12,7 @@ use xmtp::{DeliveryStatus, Message, MessageKind};
 
 /// Extract text from an inner [`EncodedContent`](xmtp::content::EncodedContent)
 /// (e.g. a reply body).
-pub fn reply_text(ec: &xmtp::content::EncodedContent) -> String {
+pub(crate) fn reply_text(ec: &xmtp::content::EncodedContent) -> String {
     let is_text = ec
         .r#type
         .as_ref()
@@ -27,7 +27,7 @@ pub fn reply_text(ec: &xmtp::content::EncodedContent) -> String {
 // ── String truncation ─────────────────────────────────────────────
 
 /// Truncate a string, appending `…` if it exceeds `max` characters.
-pub fn truncate(s: &str, max: usize) -> String {
+pub(crate) fn truncate(s: &str, max: usize) -> String {
     if s.chars().count() <= max {
         s.to_owned()
     } else {
@@ -38,7 +38,7 @@ pub fn truncate(s: &str, max: usize) -> String {
 }
 
 /// Truncate an identifier for display (e.g. `0x1a2b…c3d4`).
-pub fn truncate_id(id: &str, max: usize) -> String {
+pub(crate) fn truncate_id(id: &str, max: usize) -> String {
     if id.len() <= max {
         id.to_owned()
     } else {
@@ -50,7 +50,7 @@ pub fn truncate_id(id: &str, max: usize) -> String {
 // ── TUI display ───────────────────────────────────────────────────
 
 /// Decode a message to a short preview string for the sidebar.
-pub fn preview(msg: &Message) -> String {
+pub(crate) fn preview(msg: &Message) -> String {
     if msg.kind != MessageKind::Application {
         return String::new();
     }
@@ -71,7 +71,7 @@ pub fn preview(msg: &Message) -> String {
 }
 
 /// Decode full message body for the chat view.
-pub fn body(msg: &Message) -> String {
+pub(crate) fn body(msg: &Message) -> String {
     match msg.decode() {
         Ok(Content::Text(s) | Content::Markdown(s)) => s,
         Ok(Content::Reaction(r)) => format!("[{}]", r.content),
@@ -87,7 +87,7 @@ pub fn body(msg: &Message) -> String {
 }
 
 /// Delivery status indicator for TUI display.
-pub const fn delivery_icon(status: DeliveryStatus) -> &'static str {
+pub(crate) const fn delivery_icon(status: DeliveryStatus) -> &'static str {
     match status {
         DeliveryStatus::Published => "✓",
         DeliveryStatus::Unpublished => "○",
@@ -98,7 +98,7 @@ pub const fn delivery_icon(status: DeliveryStatus) -> &'static str {
 // ── Agent / JSON output ───────────────────────────────────────────
 
 /// Plain text extraction for agent output (no truncation).
-pub fn text(msg: &Message) -> String {
+pub(crate) fn text(msg: &Message) -> String {
     if msg.kind != MessageKind::Application {
         return String::new();
     }
@@ -111,7 +111,7 @@ pub fn text(msg: &Message) -> String {
 }
 
 /// Build a JSON representation of message content.
-pub fn content_json(msg: &Message) -> Value {
+pub(crate) fn content_json(msg: &Message) -> Value {
     if msg.kind != MessageKind::Application {
         return json!({"type": "system"});
     }

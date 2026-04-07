@@ -4,7 +4,7 @@
 //! It provides type-safe wrappers around the raw protobuf `EncodedContent`
 //! wire format so callers never need to construct protobuf bytes manually.
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 use prost::Message as ProstMessage;
 
@@ -36,8 +36,8 @@ pub struct EncodedContent {
     #[prost(message, optional, tag = "1")]
     pub r#type: Option<ContentTypeId>,
     /// Encoding parameters (e.g. `encoding=UTF-8`).
-    #[prost(map = "string, string", tag = "2")]
-    pub parameters: HashMap<String, String>,
+    #[prost(btree_map = "string, string", tag = "2")]
+    pub parameters: BTreeMap<String, String>,
     /// Fallback text for clients that cannot decode this content type.
     #[prost(string, optional, tag = "3")]
     pub fallback: Option<String>,
@@ -348,7 +348,7 @@ pub struct RemoteAttachment {
 pub fn encode_text(text: &str) -> Vec<u8> {
     EncodedContent {
         r#type: Some(make_type_id(TEXT)),
-        parameters: HashMap::from([("encoding".into(), "UTF-8".into())]),
+        parameters: BTreeMap::from([("encoding".into(), "UTF-8".into())]),
         fallback: None,
         content: text.as_bytes().to_vec(),
         compression: None,
@@ -361,7 +361,7 @@ pub fn encode_text(text: &str) -> Vec<u8> {
 pub fn encode_markdown(markdown: &str) -> Vec<u8> {
     EncodedContent {
         r#type: Some(make_type_id(MARKDOWN)),
-        parameters: HashMap::from([("encoding".into(), "UTF-8".into())]),
+        parameters: BTreeMap::from([("encoding".into(), "UTF-8".into())]),
         fallback: None,
         content: markdown.as_bytes().to_vec(),
         compression: None,
@@ -381,7 +381,7 @@ pub fn encode_reaction(reference: &str, emoji: &str, action: ReactionAction) -> 
     };
     EncodedContent {
         r#type: Some(make_type_id(REACTION)),
-        parameters: HashMap::new(),
+        parameters: BTreeMap::new(),
         fallback: Some(format!("Reacted with \"{emoji}\" to an earlier message")),
         content: rv2.encode_to_vec(),
         compression: None,
@@ -394,7 +394,7 @@ pub fn encode_reaction(reference: &str, emoji: &str, action: ReactionAction) -> 
 pub fn encode_read_receipt() -> Vec<u8> {
     EncodedContent {
         r#type: Some(make_type_id(READ_RECEIPT)),
-        parameters: HashMap::new(),
+        parameters: BTreeMap::new(),
         fallback: None,
         content: Vec::new(),
         compression: None,
@@ -410,7 +410,7 @@ pub fn encode_read_receipt() -> Vec<u8> {
 pub fn encode_reply(reference: &str, inner_content: &[u8]) -> Vec<u8> {
     EncodedContent {
         r#type: Some(make_type_id(REPLY)),
-        parameters: HashMap::from([("reference".into(), reference.into())]),
+        parameters: BTreeMap::from([("reference".into(), reference.into())]),
         fallback: Some("Replied to an earlier message".into()),
         content: inner_content.to_vec(),
         compression: None,
@@ -427,7 +427,7 @@ pub fn encode_text_reply(reference: &str, text: &str) -> Vec<u8> {
 /// Encode an inline file attachment into protobuf bytes.
 #[must_use]
 pub fn encode_attachment(attachment: &Attachment) -> Vec<u8> {
-    let mut params = HashMap::from([("mimeType".into(), attachment.mime_type.clone())]);
+    let mut params = BTreeMap::from([("mimeType".into(), attachment.mime_type.clone())]);
     if let Some(f) = &attachment.filename {
         params.insert("filename".into(), f.clone());
     }
@@ -451,7 +451,7 @@ pub fn encode_attachment(attachment: &Attachment) -> Vec<u8> {
 /// matching the official `xmtp.org/remoteStaticAttachment` wire format.
 #[must_use]
 pub fn encode_remote_attachment(ra: &RemoteAttachment) -> Vec<u8> {
-    let mut params = HashMap::from([
+    let mut params = BTreeMap::from([
         ("contentDigest".into(), ra.content_digest.clone()),
         ("salt".into(), hex::encode(&ra.salt)),
         ("nonce".into(), hex::encode(&ra.nonce)),
@@ -485,24 +485,24 @@ pub fn encode_remote_attachment(ra: &RemoteAttachment) -> Vec<u8> {
 /// Returns an error if the bytes cannot be parsed as protobuf `EncodedContent`.
 pub fn decode(raw: &[u8]) -> Result<Content> {
     let ec = EncodedContent::decode(raw)
-        .map_err(|e| crate::Error::Ffi(format!("protobuf decode: {e}")))?;
+        .map_err(|e| crate::XmtpError::Ffi(format!("protobuf decode: {e}")))?;
 
     let type_id = ec.r#type.as_ref().map(|t| t.type_id.as_str());
 
     match type_id {
         Some("text") => {
             let s = String::from_utf8(ec.content)
-                .map_err(|e| crate::Error::Ffi(format!("invalid UTF-8 text: {e}")))?;
+                .map_err(|e| crate::XmtpError::Ffi(format!("invalid UTF-8 text: {e}")))?;
             Ok(Content::Text(s))
         }
         Some("markdown") => {
             let s = String::from_utf8(ec.content)
-                .map_err(|e| crate::Error::Ffi(format!("invalid UTF-8 markdown: {e}")))?;
+                .map_err(|e| crate::XmtpError::Ffi(format!("invalid UTF-8 markdown: {e}")))?;
             Ok(Content::Markdown(s))
         }
         Some("reaction") => {
             let rv2 = ReactionV2::decode(ec.content.as_slice())
-                .map_err(|e| crate::Error::Ffi(format!("reaction decode: {e}")))?;
+                .map_err(|e| crate::XmtpError::Ffi(format!("reaction decode: {e}")))?;
             Ok(Content::Reaction(Reaction {
                 reference: rv2.reference,
                 reference_inbox_id: rv2.reference_inbox_id,
@@ -549,7 +549,7 @@ pub fn decode(raw: &[u8]) -> Result<Content> {
                 .and_then(|s| s.parse().ok());
             let filename = ec.parameters.get("filename").cloned();
             let url = String::from_utf8(ec.content)
-                .map_err(|e| crate::Error::Ffi(format!("invalid URL: {e}")))?;
+                .map_err(|e| crate::XmtpError::Ffi(format!("invalid URL: {e}")))?;
             Ok(Content::RemoteAttachment(RemoteAttachment {
                 url,
                 content_digest,

@@ -1,9 +1,9 @@
 //! CLI argument definitions and subcommand routing.
 
-pub mod agent;
-pub mod config;
-pub mod inspect;
-pub mod profile;
+pub(crate) mod agent;
+pub(crate) mod config;
+pub(crate) mod inspect;
+pub(crate) mod profile;
 
 use std::path::PathBuf;
 
@@ -16,7 +16,7 @@ use xmtp::Env;
 /// Use subcommands for one-shot operations.
 #[derive(Parser)]
 #[command(name = "xmtp", version, about, args_conflicts_with_subcommands = true)]
-pub struct Cli {
+pub(crate) struct Cli {
     /// Profile name for TUI session (uses default if omitted).
     pub profile: Option<String>,
 
@@ -26,7 +26,7 @@ pub struct Cli {
 
 /// Shared output-format options for commands that support `--json`.
 #[derive(clap::Args, Debug, Clone, Copy)]
-pub struct OutputArgs {
+pub(crate) struct OutputArgs {
     /// Output in JSON format for agent/script consumption.
     #[arg(long)]
     pub json: bool,
@@ -34,7 +34,7 @@ pub struct OutputArgs {
 
 /// One-shot operations (run and exit).
 #[derive(Subcommand)]
-pub enum Command {
+pub(crate) enum Command {
     /// Create a new profile and register with the XMTP network.
     New(NewArgs),
     /// List all saved profiles.
@@ -184,7 +184,7 @@ pub enum Command {
 
 impl Command {
     /// Whether this command was invoked with `--json`.
-    pub const fn is_json(&self) -> bool {
+    pub(crate) const fn is_json(&self) -> bool {
         match self {
             Self::List { output, .. }
             | Self::Default { output, .. }
@@ -205,7 +205,7 @@ impl Command {
 
 /// Arguments for the `new` subcommand.
 #[derive(clap::Args)]
-pub struct NewArgs {
+pub(crate) struct NewArgs {
     /// Profile name.
     pub name: String,
 
@@ -235,7 +235,7 @@ pub struct NewArgs {
     pub ledger: Option<usize>,
 }
 
-pub fn parse_env(s: &str) -> Result<Env, String> {
+pub(crate) fn parse_env(s: &str) -> Result<Env, String> {
     match s.to_ascii_lowercase().as_str() {
         "dev" | "development" => Ok(Env::Dev),
         "prod" | "production" => Ok(Env::Production),

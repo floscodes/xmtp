@@ -1,14 +1,17 @@
-#![allow(unsafe_code)]
+#![allow(
+    unsafe_code,
+    reason = "FFI error retrieval requires unsafe calls to xmtp_sys"
+)]
 //! Unified error types for the XMTP SDK.
 
 use std::ffi::CStr;
 
 /// Convenience alias used throughout the crate.
-pub type Result<T> = std::result::Result<T, Error>;
+pub type Result<T> = std::result::Result<T, XmtpError>;
 
 /// Top-level error type for the XMTP SDK.
 #[derive(Debug, thiserror::Error)]
-pub enum Error {
+pub enum XmtpError {
     /// An error originating from the underlying FFI / native library.
     #[error("xmtp ffi: {0}")]
     Ffi(String),
@@ -39,23 +42,26 @@ pub enum Error {
 }
 
 /// Read the last FFI error message from thread-local storage.
-pub(crate) fn last_ffi_error() -> Error {
+pub(crate) fn last_ffi_error() -> XmtpError {
+    // SAFETY: `xmtp_last_error_length` reads from thread-local storage with no preconditions.
     let len = unsafe { xmtp_sys::xmtp_last_error_length() };
     if len <= 0 {
-        return Error::Ffi("unknown FFI error".into());
+        return XmtpError::Ffi("unknown FFI error".into());
     }
     let mut buf = vec![0u8; len.unsigned_abs() as usize];
+    // SAFETY: `buf` is a valid mutable buffer of `len` bytes allocated above.
     let written = unsafe { xmtp_sys::xmtp_last_error_message(buf.as_mut_ptr().cast(), len) };
     if written <= 0 {
-        return Error::Ffi("failed to read FFI error".into());
+        return XmtpError::Ffi("failed to read FFI error".into());
     }
+    let written_len = written.unsigned_abs() as usize;
     CStr::from_bytes_until_nul(&buf).map_or_else(
         |_| {
-            Error::Ffi(
-                String::from_utf8_lossy(&buf[..written.unsigned_abs() as usize]).into_owned(),
+            XmtpError::Ffi(
+                String::from_utf8_lossy(buf.get(..written_len).unwrap_or(&buf)).into_owned(),
             )
         },
-        |cstr| Error::Ffi(cstr.to_string_lossy().into_owned()),
+        |cstr| XmtpError::Ffi(cstr.to_string_lossy().into_owned()),
     )
 }
 

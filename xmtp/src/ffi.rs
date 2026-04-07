@@ -1,25 +1,30 @@
-#![allow(unsafe_code)]
+#![allow(
+    unsafe_code,
+    reason = "FFI utilities require unsafe for raw pointer and C string operations"
+)]
 //! Internal FFI utilities: RAII handle wrapper + C string helpers.
 
 use std::ffi::{CStr, CString, c_char};
 use std::ptr::NonNull;
 
-use crate::error::{Error, Result};
+use crate::error::{Result, XmtpError};
 
 /// RAII wrapper for an opaque FFI pointer. Calls `free` on drop.
-pub struct OwnedHandle<T> {
+pub(crate) struct OwnedHandle<T> {
     ptr: NonNull<T>,
     free: unsafe extern "C" fn(*mut T),
 }
 
+// SAFETY: FFI handles are opaque pointers to thread-safe C objects managed by libxmtp.
+// The C library guarantees thread-safe access to these handles.
 unsafe impl<T> Send for OwnedHandle<T> {}
 
 impl<T> OwnedHandle<T> {
-    /// Wrap a raw FFI pointer. Returns [`Error::NullPointer`] if null.
+    /// Wrap a raw FFI pointer. Returns [`XmtpError::NullPointer`] if null.
     pub(crate) fn new(ptr: *mut T, free: unsafe extern "C" fn(*mut T)) -> Result<Self> {
         NonNull::new(ptr)
             .map(|ptr| Self { ptr, free })
-            .ok_or(Error::NullPointer)
+            .ok_or(XmtpError::NullPointer)
     }
 
     /// Const pointer for FFI read calls.
@@ -31,6 +36,8 @@ impl<T> OwnedHandle<T> {
 
 impl<T> Drop for OwnedHandle<T> {
     fn drop(&mut self) {
+        // SAFETY: `self.ptr` is a valid, non-null pointer obtained from the FFI layer,
+        // and `self.free` is the matching deallocation function provided at construction.
         unsafe { (self.free)(self.ptr.as_ptr()) };
     }
 }
@@ -44,42 +51,48 @@ impl<T> std::fmt::Debug for OwnedHandle<T> {
 }
 
 /// Take ownership of a C string, convert to `String`, then free via `xmtp_free_string`.
-pub unsafe fn take_c_string(ptr: *mut c_char) -> Result<String> {
+pub(crate) unsafe fn take_c_string(ptr: *mut c_char) -> Result<String> {
     if ptr.is_null() {
-        return Err(Error::NullPointer);
+        return Err(XmtpError::NullPointer);
     }
+    // SAFETY: `ptr` is non-null and points to a valid NUL-terminated C string from the FFI layer.
     let cstr = unsafe { CStr::from_ptr(ptr) };
     let s = cstr
         .to_str()
         .map(String::from)
-        .map_err(|_| Error::InvalidUtf8);
+        .map_err(|_| XmtpError::InvalidUtf8);
+    // SAFETY: `ptr` was allocated by the C library and must be freed with `xmtp_free_string`.
     unsafe { xmtp_sys::xmtp_free_string(ptr) };
     s
 }
 
 /// Convert `&str` to `CString` for FFI.
-pub fn to_c_string(s: &str) -> Result<CString> {
-    CString::new(s).map_err(|_| Error::InvalidArgument("string contains NUL".into()))
+pub(crate) fn to_c_string(s: &str) -> Result<CString> {
+    CString::new(s).map_err(|_| XmtpError::InvalidArgument("string contains NUL".into()))
 }
 
 /// Read a **borrowed** C string array into `Vec<String>`. Does NOT free anything.
-pub unsafe fn read_borrowed_strings(ptr: *const *mut c_char, count: i32) -> Vec<String> {
+pub(crate) unsafe fn read_borrowed_strings(ptr: *const *mut c_char, count: i32) -> Vec<String> {
     if ptr.is_null() || count <= 0 {
         return vec![];
     }
     (0..count.unsigned_abs() as usize)
         .filter_map(|i| {
-            let s = unsafe { *ptr.add(i) };
+            // SAFETY: `ptr` points to an array of at least `count` pointers, so `ptr.add(i)` is in-bounds.
+            let elem = unsafe { ptr.add(i) };
+            // SAFETY: `elem` is a valid aligned pointer within the array.
+            let s = unsafe { *elem };
             if s.is_null() {
                 return None;
             }
+            // SAFETY: `s` is a non-null pointer to a valid NUL-terminated C string owned by the FFI layer.
             unsafe { CStr::from_ptr(s) }.to_str().ok().map(String::from)
         })
         .collect()
 }
 
 /// Convert a slice of string refs to C string arrays for FFI.
-pub fn to_c_string_array(strings: &[&str]) -> Result<(Vec<CString>, Vec<*const c_char>)> {
+pub(crate) fn to_c_string_array(strings: &[&str]) -> Result<(Vec<CString>, Vec<*const c_char>)> {
     let owned: Vec<CString> = strings
         .iter()
         .map(|s| to_c_string(s))
@@ -89,7 +102,7 @@ pub fn to_c_string_array(strings: &[&str]) -> Result<(Vec<CString>, Vec<*const c
 }
 
 /// Convert `AccountIdentifier`s to parallel C arrays (addresses + kinds).
-pub fn identifiers_to_ffi(
+pub(crate) fn identifiers_to_ffi(
     ids: &[crate::types::AccountIdentifier],
 ) -> Result<(Vec<CString>, Vec<*const c_char>, Vec<i32>)> {
     let owned: Vec<CString> = ids
@@ -102,21 +115,22 @@ pub fn identifiers_to_ffi(
 }
 
 /// Take ownership of a nullable C string. Returns `None` if null. Frees the string.
-pub unsafe fn take_nullable_string(ptr: *mut c_char) -> Option<String> {
+pub(crate) unsafe fn take_nullable_string(ptr: *mut c_char) -> Option<String> {
     if ptr.is_null() {
         None
     } else {
+        // SAFETY: `ptr` is non-null; caller guarantees it points to a valid owned C string.
         unsafe { take_c_string(ptr) }.ok()
     }
 }
 
 /// Get pointer from an optional `CString` (null if `None`).
-pub fn c_str_ptr(opt: Option<&CString>) -> *const c_char {
+pub(crate) fn c_str_ptr(opt: Option<&CString>) -> *const c_char {
     opt.map_or(std::ptr::null(), |c| c.as_ptr())
 }
 
 /// Convert optional `&str` to optional `CString`.
-pub fn optional_c_string(s: Option<&str>) -> Result<Option<CString>> {
+pub(crate) fn optional_c_string(s: Option<&str>) -> Result<Option<CString>> {
     s.map(to_c_string).transpose()
 }
 
@@ -124,7 +138,7 @@ pub fn optional_c_string(s: Option<&str>) -> Result<Option<CString>> {
 ///
 /// Guarantees the list is freed on all exit paths (including panics),
 /// and normalises a null pointer or negative length to an empty iteration.
-pub struct FfiList<T> {
+pub(crate) struct FfiList<T> {
     ptr: *mut T,
     len: i32,
     free: unsafe extern "C" fn(*mut T),
@@ -134,7 +148,7 @@ impl<T> FfiList<T> {
     /// Wrap a nullable FFI list pointer.
     ///
     /// `len_fn` takes `*const T` (read-only), `free` takes `*mut T` (ownership).
-    pub fn new(
+    pub(crate) fn new(
         ptr: *mut T,
         len_fn: unsafe extern "C" fn(*const T) -> i32,
         free: unsafe extern "C" fn(*mut T),
@@ -142,17 +156,18 @@ impl<T> FfiList<T> {
         if ptr.is_null() {
             return Self { ptr, len: 0, free };
         }
+        // SAFETY: `ptr` is non-null and points to a valid FFI list; `len_fn` is its length accessor.
         let len = unsafe { len_fn(ptr.cast_const()) }.max(0);
         Self { ptr, len, free }
     }
 
     #[inline]
-    pub const fn len(&self) -> i32 {
+    pub(crate) const fn len(&self) -> i32 {
         self.len
     }
 
     #[inline]
-    pub const fn as_ptr(&self) -> *mut T {
+    pub(crate) const fn as_ptr(&self) -> *mut T {
         self.ptr
     }
 }
@@ -160,6 +175,8 @@ impl<T> FfiList<T> {
 impl<T> Drop for FfiList<T> {
     fn drop(&mut self) {
         if !self.ptr.is_null() {
+            // SAFETY: `self.ptr` is non-null and was obtained from the FFI layer;
+            // `self.free` is the matching deallocation function.
             unsafe { (self.free)(self.ptr) };
         }
     }
@@ -167,11 +184,11 @@ impl<T> Drop for FfiList<T> {
 
 /// Convert an FFI `i32` length to `usize`, clamping negatives to zero.
 #[inline]
-pub fn ffi_usize(raw: i32) -> usize {
+pub(crate) fn ffi_usize(raw: i32) -> usize {
     raw.max(0) as usize
 }
 
 /// Convert a Rust `usize` length to FFI `i32`, returning an error on overflow.
-pub fn to_ffi_len(len: usize) -> Result<i32> {
-    i32::try_from(len).map_err(|_| Error::InvalidArgument("length exceeds i32::MAX".into()))
+pub(crate) fn to_ffi_len(len: usize) -> Result<i32> {
+    i32::try_from(len).map_err(|_| XmtpError::InvalidArgument("length exceeds i32::MAX".into()))
 }

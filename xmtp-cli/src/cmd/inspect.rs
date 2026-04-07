@@ -7,7 +7,7 @@ use crate::decode;
 ///
 /// Uses `open_client()` — no signer needed, Ledger users don't need
 /// their device connected just to view info.
-pub fn info(profile: &str, json: bool) -> xmtp::Result<()> {
+pub(crate) fn info(profile: &str, json: bool) -> xmtp::Result<()> {
     let (cfg, client) = config::open_client(profile)?;
     let inbox_id = client.inbox_id()?;
 
@@ -73,7 +73,7 @@ pub fn info(profile: &str, json: bool) -> xmtp::Result<()> {
 /// Revoke all installations except the current one.
 ///
 /// Uses `open_with_signer()` — signing is required for revocation.
-pub fn revoke(profile: &str) -> xmtp::Result<()> {
+pub(crate) fn revoke(profile: &str) -> xmtp::Result<()> {
     let (_cfg, signer, client) = config::open_with_signer(profile)?;
 
     let current = client.installation_id()?;

@@ -24,7 +24,7 @@ use crate::event::{
 /// Client construction + sync happen here (on the worker thread) so the TUI
 /// renders immediately without blocking on network setup.
 #[allow(clippy::needless_pass_by_value)]
-pub fn run(rx: mpsc::Receiver<Cmd>, tx: Tx, cmd_tx: CmdTx, profile: &str) {
+pub(crate) fn run(rx: mpsc::Receiver<Cmd>, tx: Tx, cmd_tx: CmdTx, profile: &str) {
     let _ = tx.send(Event::Flash("Connecting...".into()));
 
     let (cfg, client) = match config::open_client(profile) {

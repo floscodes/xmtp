@@ -32,7 +32,9 @@ impl Recipient {
         let s = input.trim();
         if s.len() == 42
             && s.starts_with("0x")
-            && s.as_bytes()[2..].iter().all(u8::is_ascii_hexdigit)
+            && s.as_bytes()
+                .get(2..)
+                .is_some_and(|b| b.iter().all(u8::is_ascii_hexdigit))
         {
             Self::Address(s.to_lowercase())
         } else if s.contains('.') {
@@ -83,7 +85,7 @@ pub trait Resolver: Send + Sync {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::Resolution`](crate::Error::Resolution) if resolution fails.
+    /// Returns [`XmtpError::Resolution`](crate::XmtpError::Resolution) if resolution fails.
     fn resolve(&self, name: &str) -> Result<String>;
 
     /// Reverse-resolve an Ethereum address to a human-readable name (e.g. ENS).
@@ -92,7 +94,7 @@ pub trait Resolver: Send + Sync {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::Resolution`](crate::Error::Resolution) on network/lookup failure.
+    /// Returns [`XmtpError::Resolution`](crate::XmtpError::Resolution) on network/lookup failure.
     fn reverse_resolve(&self, _address: &str) -> Result<Option<String>> {
         Ok(None)
     }

@@ -16,14 +16,14 @@ use xmtp::{
 };
 
 /// Event sender (terminal poller + worker → main thread).
-pub type Tx = mpsc::Sender<Event>;
+pub(crate) type Tx = mpsc::Sender<Event>;
 
 /// Command sender (App + stream callbacks → worker thread).
-pub type CmdTx = mpsc::Sender<Cmd>;
+pub(crate) type CmdTx = mpsc::Sender<Cmd>;
 
 /// Sidebar conversation entry (display-only, no FFI handles).
 #[derive(Debug, Clone)]
-pub struct ConvEntry {
+pub(crate) struct ConvEntry {
     pub id: String,
     pub label: String,
     pub preview: String,
@@ -33,14 +33,14 @@ pub struct ConvEntry {
 
 /// Which group metadata field is being edited.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum GroupField {
+pub(crate) enum GroupField {
     Name,
     Description,
 }
 
 /// Single row in the permissions overlay.
 #[derive(Debug, Clone, Copy)]
-pub struct PermissionRow {
+pub(crate) struct PermissionRow {
     pub label: &'static str,
     pub policy: PermissionPolicy,
     pub update_type: PermissionUpdateType,
@@ -49,13 +49,13 @@ pub struct PermissionRow {
 
 /// Group info sent alongside members.
 #[derive(Debug, Clone, Default)]
-pub struct GroupInfo {
+pub(crate) struct GroupInfo {
     pub description: String,
 }
 
 /// Group member entry for display.
 #[derive(Debug, Clone)]
-pub struct MemberEntry {
+pub(crate) struct MemberEntry {
     pub inbox_id: String,
     /// Display name (ENS or truncated primary address).
     pub label: String,
@@ -66,7 +66,7 @@ pub struct MemberEntry {
 
 /// Events consumed by the main loop. Worker results are non-blocking.
 #[derive(Debug)]
-pub enum Event {
+pub(crate) enum Event {
     /// Terminal key press.
     Key(KeyEvent),
     /// Terminal resize.
@@ -110,7 +110,7 @@ pub enum Event {
 
 /// Commands sent from UI thread (or stream callbacks) to the worker thread.
 #[derive(Debug)]
-pub enum Cmd {
+pub(crate) enum Cmd {
     /// Open conversation by ID, load its messages.
     Open(String),
     /// Send text in the active conversation.
@@ -156,7 +156,7 @@ pub enum Cmd {
 }
 
 /// Spawn the terminal-polling thread. Sends [`Event::Key`], [`Event::Resize`], [`Event::Tick`].
-pub fn spawn_poller(tx: Tx, tick: Duration) {
+pub(crate) fn spawn_poller(tx: Tx, tick: Duration) {
     std::thread::spawn(move || {
         loop {
             let ok = match event::poll(tick) {

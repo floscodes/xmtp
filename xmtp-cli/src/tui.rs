@@ -10,23 +10,23 @@ use ratatui::crossterm::terminal::{
 };
 
 /// The terminal type used throughout the application.
-pub type Tui = Terminal<CrosstermBackend<Stdout>>;
+pub(crate) type Tui = Terminal<CrosstermBackend<Stdout>>;
 
 /// Enter raw mode and the alternate screen.
-pub fn init() -> io::Result<Tui> {
+pub(crate) fn init() -> io::Result<Tui> {
     enable_raw_mode()?;
     stdout().execute(EnterAlternateScreen)?;
     Terminal::new(CrosstermBackend::new(stdout()))
 }
 
 /// Leave the alternate screen and restore cooked mode.
-pub fn restore() -> io::Result<()> {
+pub(crate) fn restore() -> io::Result<()> {
     stdout().execute(LeaveAlternateScreen)?;
     disable_raw_mode()
 }
 
 /// Install a panic hook that restores the terminal before printing.
-pub fn install_panic_hook() {
+pub(crate) fn install_panic_hook() {
     let original = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
         let _ = restore();

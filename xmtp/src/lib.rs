@@ -1,6 +1,9 @@
 #![cfg_attr(docsrs, feature(doc_auto_cfg))]
 #![doc = include_str!("../README.md")]
-#![allow(unsafe_code)]
+#![allow(
+    unsafe_code,
+    reason = "FFI wrapper crate requires unsafe for C interop"
+)]
 // FFI wrapper crate: i32 ↔ usize casts at the C boundary are systematic and
 // bounds-checked. Every public function follows the same error pattern (FFI
 // call failure), so per-function `# Errors` docs would be pure boilerplate.
@@ -8,7 +11,8 @@
     clippy::cast_sign_loss,
     clippy::cast_possible_truncation,
     clippy::cast_possible_wrap,
-    clippy::missing_errors_doc
+    clippy::missing_errors_doc,
+    reason = "FFI boundary casts are systematic and bounds-checked; every public function follows the same error pattern"
 )]
 
 pub mod client;
@@ -43,7 +47,7 @@ pub use client::{
 pub use conversation::{Conversation, GroupMember, Message};
 #[cfg(feature = "ens")]
 pub use ens::{DEFAULT_RPC, EnsResolver};
-pub use error::{Error, Result};
+pub use error::{Result, XmtpError};
 #[cfg(feature = "ledger")]
 pub use ledger::LedgerSigner;
 pub use resolve::{Recipient, Resolver};

@@ -13,7 +13,7 @@ use alloy_ens::ProviderEnsExt as _;
 use alloy_provider::ProviderBuilder;
 use tokio::runtime::Runtime;
 
-use crate::error::{Error, Result};
+use crate::error::{Result, XmtpError};
 use crate::resolve::Resolver;
 
 /// Per-call timeout for RPC operations (connect + execute).
@@ -74,11 +74,11 @@ impl EnsResolver {
     pub fn new(rpc_url: &str) -> Result<Self> {
         let rpc_url: url::Url = rpc_url
             .parse()
-            .map_err(|e| Error::InvalidArgument(format!("bad RPC URL: {e}")))?;
+            .map_err(|e| XmtpError::InvalidArgument(format!("bad RPC URL: {e}")))?;
         let rt = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
-            .map_err(|e| Error::Resolution(e.to_string()))?;
+            .map_err(|e| XmtpError::Resolution(e.to_string()))?;
         Ok(Self { rt, rpc_url })
     }
 }
@@ -89,8 +89,8 @@ impl Resolver for EnsResolver {
         let addr = self.rt.block_on(async {
             tokio::time::timeout(RPC_TIMEOUT, provider.resolve_name(name))
                 .await
-                .map_err(|_| Error::Resolution(format!("{name}: timeout")))?
-                .map_err(|e| Error::Resolution(format!("{name}: {e}")))
+                .map_err(|_| XmtpError::Resolution(format!("{name}: timeout")))?
+                .map_err(|e| XmtpError::Resolution(format!("{name}: {e}")))
         })?;
         Ok(addr.to_string().to_lowercase())
     }
@@ -98,13 +98,13 @@ impl Resolver for EnsResolver {
     fn reverse_resolve(&self, address: &str) -> Result<Option<String>> {
         let addr: alloy_primitives::Address = address
             .parse()
-            .map_err(|e| Error::Resolution(format!("{address}: {e}")))?;
+            .map_err(|e| XmtpError::Resolution(format!("{address}: {e}")))?;
         let provider = ProviderBuilder::new().connect_http(self.rpc_url.clone());
         self.rt.block_on(async {
             match tokio::time::timeout(RPC_TIMEOUT, provider.lookup_address(&addr)).await {
                 Ok(Ok(name)) => Ok(Some(name)),
                 Ok(Err(_)) => Ok(None),
-                Err(_) => Err(Error::Resolution(format!("{address}: timeout"))),
+                Err(_) => Err(XmtpError::Resolution(format!("{address}: timeout"))),
             }
         })
     }

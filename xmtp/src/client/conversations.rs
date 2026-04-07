@@ -1,4 +1,7 @@
-#![allow(unsafe_code)]
+#![allow(
+    unsafe_code,
+    reason = "Conversation management requires unsafe for FFI calls to xmtp_sys"
+)]
 //! Conversation creation, listing, synchronization, and message lookup.
 
 use std::ptr;
@@ -43,24 +46,24 @@ impl Client {
         let (identifiers, inbox_ids) = self.resolve_recipients(members)?;
         // Pick the most efficient FFI path.
         if inbox_ids.is_empty() {
-            self.group_by_identifiers(&identifiers, opts)
-        } else if identifiers.is_empty() {
-            let ids: Vec<&str> = inbox_ids.iter().map(String::as_str).collect();
-            self.group_by_inbox_ids(&ids, opts)
-        } else {
-            // Mixed: resolve identifiers → inbox IDs, then create by inbox IDs.
-            let mut all_ids = inbox_ids;
-            for ident in &identifiers {
-                let id = self
-                    .inbox_id_for(&ident.address, ident.kind)?
-                    .ok_or_else(|| {
-                        crate::Error::Resolution(format!("no inbox for {}", ident.address))
-                    })?;
-                all_ids.push(id);
-            }
-            let ids: Vec<&str> = all_ids.iter().map(String::as_str).collect();
-            self.group_by_inbox_ids(&ids, opts)
+            return self.group_by_identifiers(&identifiers, opts);
         }
+        if identifiers.is_empty() {
+            let ids: Vec<&str> = inbox_ids.iter().map(String::as_str).collect();
+            return self.group_by_inbox_ids(&ids, opts);
+        }
+        // Mixed: resolve identifiers → inbox IDs, then create by inbox IDs.
+        let mut all_ids = inbox_ids;
+        for ident in &identifiers {
+            let id = self
+                .inbox_id_for(&ident.address, ident.kind)?
+                .ok_or_else(|| {
+                    crate::XmtpError::Resolution(format!("no inbox for {}", ident.address))
+                })?;
+            all_ids.push(id);
+        }
+        let ids: Vec<&str> = all_ids.iter().map(String::as_str).collect();
+        self.group_by_inbox_ids(&ids, opts)
     }
 
     /// Add members to a group conversation by any recipient type.
@@ -131,7 +134,9 @@ impl Client {
         let idents: Vec<AccountIdentifier> = checks.iter().map(|(_, id)| id.clone()).collect();
         let flags = self.can_message(&idents)?;
         for ((idx, _), reachable) in checks.into_iter().zip(flags) {
-            results[idx] = reachable;
+            if let Some(slot) = results.get_mut(idx) {
+                *slot = reachable;
+            }
         }
         Ok(results)
     }
@@ -140,7 +145,7 @@ impl Client {
     fn resolve_ens(&self, name: &str) -> Result<String> {
         self.resolver
             .as_ref()
-            .ok_or(crate::Error::NoResolver)?
+            .ok_or(crate::XmtpError::NoResolver)?
             .resolve(name)
     }
 
@@ -181,6 +186,7 @@ impl Client {
     pub fn group_optimistic(&self, opts: &CreateGroupOptions) -> Result<Conversation> {
         with_group_ffi_opts(opts, |ffi_opts| {
             let mut out: *mut xmtp_sys::XmtpFfiConversation = ptr::null_mut();
+            // SAFETY: Valid handle and FFI options; `out` receives the result.
             let rc = unsafe {
                 xmtp_sys::xmtp_client_create_group_optimistic(
                     self.handle.as_ptr(),
@@ -206,6 +212,7 @@ impl Client {
                 ptrs.as_ptr()
             };
             let mut out: *mut xmtp_sys::XmtpFfiConversation = ptr::null_mut();
+            // SAFETY: Valid handle, FFI options, and CString array with matching length.
             let rc = unsafe {
                 xmtp_sys::xmtp_client_create_group(
                     self.handle.as_ptr(),
@@ -228,6 +235,7 @@ impl Client {
         let (_owned, ptrs, kinds) = identifiers_to_ffi(identifiers)?;
         with_group_ffi_opts(opts, |ffi_opts| {
             let mut out: *mut xmtp_sys::XmtpFfiConversation = ptr::null_mut();
+            // SAFETY: Valid handle, FFI options, and identifier arrays with matching length.
             let rc = unsafe {
                 xmtp_sys::xmtp_client_create_group_by_identity(
                     self.handle.as_ptr(),
@@ -278,6 +286,7 @@ impl Client {
     pub fn find_dm(&self, inbox_id: &str) -> Result<Option<Conversation>> {
         let c = to_c_string(inbox_id)?;
         let mut out: *mut xmtp_sys::XmtpFfiConversation = ptr::null_mut();
+        // SAFETY: Valid handle and CString; `out` receives the conversation pointer.
         let rc = unsafe {
             xmtp_sys::xmtp_client_find_dm_by_inbox_id(
                 self.handle.as_ptr(),
@@ -297,6 +306,7 @@ impl Client {
         let c = to_c_string(address)?;
         let ds = opts.disappearing.unwrap_or_default();
         let mut out: *mut xmtp_sys::XmtpFfiConversation = ptr::null_mut();
+        // SAFETY: Valid handle and CString; `out` receives the conversation pointer.
         let rc = unsafe {
             xmtp_sys::xmtp_client_create_dm(
                 self.handle.as_ptr(),
@@ -315,6 +325,7 @@ impl Client {
         let c = to_c_string(inbox_id)?;
         let ds = opts.disappearing.unwrap_or_default();
         let mut out: *mut xmtp_sys::XmtpFfiConversation = ptr::null_mut();
+        // SAFETY: Valid handle and CString; `out` receives the conversation pointer.
         let rc = unsafe {
             xmtp_sys::xmtp_client_create_dm_by_inbox_id(
                 self.handle.as_ptr(),
@@ -332,6 +343,7 @@ impl Client {
     pub fn conversation(&self, hex_id: &str) -> Result<Option<Conversation>> {
         let c = to_c_string(hex_id)?;
         let mut out: *mut xmtp_sys::XmtpFfiConversation = ptr::null_mut();
+        // SAFETY: Valid handle and CString; `out` receives the conversation pointer.
         let rc = unsafe {
             xmtp_sys::xmtp_client_get_conversation_by_id(
                 self.handle.as_ptr(),
@@ -391,6 +403,7 @@ impl Client {
             include_duplicate_dms: i32::from(options.include_duplicate_dms),
         };
         let mut list: *mut xmtp_sys::XmtpFfiConversationList = ptr::null_mut();
+        // SAFETY: Valid handle and fully initialized FFI options struct; `list` receives the result.
         let rc = unsafe {
             xmtp_sys::xmtp_client_list_conversations(
                 self.handle.as_ptr(),
@@ -404,6 +417,7 @@ impl Client {
 
     /// Sync welcomes (process new group invitations).
     pub fn sync_welcomes(&self) -> Result<()> {
+        // SAFETY: Valid handle pointer.
         error::check(unsafe { xmtp_sys::xmtp_client_sync_welcomes(self.handle.as_ptr()) })
     }
 
@@ -411,6 +425,7 @@ impl Client {
     pub fn sync_all(&self, consent_states: &[ConsentState]) -> Result<SyncResult> {
         let cs: Vec<i32> = consent_states.iter().map(|s| *s as i32).collect();
         let (mut synced, mut eligible) = (0i32, 0i32);
+        // SAFETY: Valid handle and consent state array (or null); output pointers are valid.
         let rc = unsafe {
             xmtp_sys::xmtp_client_sync_all(
                 self.handle.as_ptr(),
@@ -435,6 +450,7 @@ impl Client {
     pub fn delete_message(&self, message_id_hex: &str) -> Result<i32> {
         let c = to_c_string(message_id_hex)?;
         let rows =
+            // SAFETY: Valid handle and CString.
             unsafe { xmtp_sys::xmtp_client_delete_message_by_id(self.handle.as_ptr(), c.as_ptr()) };
         if rows < 0 {
             Err(error::last_ffi_error())
@@ -447,6 +463,7 @@ impl Client {
     pub fn message_by_id(&self, message_id_hex: &str) -> Result<Option<Message>> {
         let c = to_c_string(message_id_hex)?;
         let mut out: *mut xmtp_sys::XmtpFfiEnrichedMessageList = ptr::null_mut();
+        // SAFETY: Valid handle and CString; `out` receives the message list.
         let rc = unsafe {
             xmtp_sys::xmtp_client_get_enriched_message_by_id(
                 self.handle.as_ptr(),
@@ -461,6 +478,7 @@ impl Client {
     /// Sync preferences (device sync groups only).
     pub fn sync_preferences(&self) -> Result<SyncResult> {
         let (mut synced, mut eligible) = (0i32, 0i32);
+        // SAFETY: Valid handle; output pointers receive sync counts.
         let rc = unsafe {
             xmtp_sys::xmtp_client_sync_preferences(
                 self.handle.as_ptr(),
@@ -478,6 +496,7 @@ impl Client {
     /// Get HMAC keys for all conversations. For push notification verification.
     pub fn hmac_keys(&self) -> Result<Vec<HmacKeyEntry>> {
         let mut map: *mut xmtp_sys::XmtpFfiHmacKeyMap = ptr::null_mut();
+        // SAFETY: Valid handle; `map` receives the HMAC key map.
         let rc = unsafe { xmtp_sys::xmtp_client_hmac_keys(self.handle.as_ptr(), &raw mut map) };
         error::check(rc)?;
         Ok(read_hmac_key_map(map))

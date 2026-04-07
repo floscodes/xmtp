@@ -1,4 +1,7 @@
-#![allow(unsafe_code)]
+#![allow(
+    unsafe_code,
+    reason = "Identity operations require unsafe for FFI calls to xmtp_sys"
+)]
 //! Identity management: add/remove accounts, revoke installations.
 
 use std::ptr;
@@ -14,6 +17,7 @@ impl Client {
     pub fn add_account(&self, existing_signer: &dyn Signer, new_signer: &dyn Signer) -> Result<()> {
         let new_ident = new_signer.identifier();
         let c_addr = to_c_string(&new_ident.address)?;
+        // SAFETY: Valid handle and CString; `out` receives the signature request pointer.
         create_sign_apply(self, &[existing_signer, new_signer], |out| unsafe {
             xmtp_sys::xmtp_client_add_identifier_signature_request(
                 self.handle.as_ptr(),
@@ -31,6 +35,7 @@ impl Client {
         identifier: &AccountIdentifier,
     ) -> Result<()> {
         let c = to_c_string(&identifier.address)?;
+        // SAFETY: Valid handle and CString; `out` receives the signature request pointer.
         create_sign_apply(self, &[signer], |out| unsafe {
             xmtp_sys::xmtp_client_revoke_identifier_signature_request(
                 self.handle.as_ptr(),
@@ -43,6 +48,7 @@ impl Client {
 
     /// Revoke all installations except the current one.
     pub fn revoke_all_other_installations(&self, signer: &dyn Signer) -> Result<()> {
+        // SAFETY: Valid handle; `out` receives the signature request pointer.
         create_sign_apply(self, &[signer], |out| unsafe {
             xmtp_sys::xmtp_client_revoke_all_other_installations(self.handle.as_ptr(), out)
         })
@@ -60,6 +66,7 @@ impl Client {
             .map(|id| to_ffi_len(id.len()))
             .collect::<Result<_>>()?;
         let count = to_ffi_len(ptrs.len())?;
+        // SAFETY: Valid handle and parallel arrays with matching length; `out` receives the result.
         create_sign_apply(self, &[signer], |out| unsafe {
             xmtp_sys::xmtp_client_revoke_installations_signature_request(
                 self.handle.as_ptr(),
@@ -78,6 +85,7 @@ impl Client {
         new_identifier: &AccountIdentifier,
     ) -> Result<()> {
         let c = to_c_string(&new_identifier.address)?;
+        // SAFETY: Valid handle and CString; `out` receives the signature request pointer.
         create_sign_apply(self, &[signer], |out| unsafe {
             xmtp_sys::xmtp_client_change_recovery_identifier_signature_request(
                 self.handle.as_ptr(),
