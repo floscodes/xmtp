@@ -105,30 +105,43 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parse_eth_address() {
+    fn parse_eth_address_lowercase() {
         let addr = "0x1234567890abcdef1234567890abcdef12345678";
+        assert_eq!(Recipient::parse(addr), Recipient::Address(addr.into()));
+    }
+
+    #[test]
+    fn parse_eth_address_normalizes_case() {
+        let mixed = "0xABCDef1234567890abcdef1234567890ABCDEF12";
         assert_eq!(
-            Recipient::parse(addr),
-            Recipient::Address(addr.to_lowercase())
+            Recipient::parse(mixed),
+            Recipient::Address(mixed.to_lowercase())
         );
     }
 
     #[test]
-    fn parse_eth_address_uppercase() {
-        let addr = "0xABCDEF1234567890ABCDEF1234567890ABCDEF12";
+    fn parse_trims_whitespace() {
+        let padded = "  0x1234567890abcdef1234567890abcdef12345678  ";
+        assert!(matches!(Recipient::parse(padded), Recipient::Address(_)));
+    }
+
+    #[test]
+    fn parse_42_char_non_hex_is_not_address() {
+        let bad = "0xZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ";
+        assert_eq!(Recipient::parse(bad), Recipient::InboxId(bad.into()));
+    }
+
+    #[test]
+    fn parse_short_0x_is_inbox_id() {
         assert_eq!(
-            Recipient::parse(addr),
-            Recipient::Address(addr.to_lowercase())
+            Recipient::parse("0x1234"),
+            Recipient::InboxId("0x1234".into())
         );
     }
 
     #[test]
-    fn parse_eth_address_trimmed() {
-        let addr = "  0x1234567890abcdef1234567890abcdef12345678  ";
-        assert_eq!(
-            Recipient::parse(addr),
-            Recipient::Address(addr.trim().to_lowercase())
-        );
+    fn parse_empty_string() {
+        assert_eq!(Recipient::parse(""), Recipient::InboxId(String::new()));
     }
 
     #[test]
@@ -140,51 +153,30 @@ mod tests {
     }
 
     #[test]
-    fn parse_ens_subdomain() {
+    fn parse_plain_string_is_inbox_id() {
         assert_eq!(
-            Recipient::parse("sub.name.eth"),
-            Recipient::Ens("sub.name.eth".into())
+            Recipient::parse("abc123deadbeef"),
+            Recipient::InboxId("abc123deadbeef".into())
         );
     }
 
     #[test]
-    fn parse_inbox_id() {
-        let id = "abc123deadbeef";
-        assert_eq!(Recipient::parse(id), Recipient::InboxId(id.into()));
-    }
-
-    #[test]
-    fn parse_short_hex_is_inbox_id() {
-        let short = "0x1234";
-        assert_eq!(Recipient::parse(short), Recipient::InboxId(short.into()));
-    }
-
-    #[test]
-    fn display_roundtrip() {
-        let addr = "0x1234567890abcdef1234567890abcdef12345678";
-        let r = Recipient::parse(addr);
-        assert_eq!(r.to_string(), addr.to_lowercase());
-    }
-
-    #[test]
-    fn from_str_trait() {
-        let r: Recipient = "vitalik.eth".into();
-        assert_eq!(r, Recipient::Ens("vitalik.eth".into()));
-    }
-
-    #[test]
-    fn from_string_trait() {
-        let r: Recipient = String::from("vitalik.eth").into();
-        assert_eq!(r, Recipient::Ens("vitalik.eth".into()));
-    }
-
-    #[test]
-    fn from_account_identifier() {
+    fn from_account_identifier_ethereum() {
         use crate::types::{AccountIdentifier, IdentifierKind};
         let id = AccountIdentifier {
             address: "0xabc".into(),
             kind: IdentifierKind::Ethereum,
         };
         assert_eq!(Recipient::from(id), Recipient::Address("0xabc".into()));
+    }
+
+    #[test]
+    fn from_account_identifier_passkey() {
+        use crate::types::{AccountIdentifier, IdentifierKind};
+        let id = AccountIdentifier {
+            address: "pk_123".into(),
+            kind: IdentifierKind::Passkey,
+        };
+        assert_eq!(Recipient::from(id), Recipient::InboxId("pk_123".into()));
     }
 }

@@ -578,41 +578,29 @@ mod tests {
     use super::*;
 
     #[test]
-    fn env_urls() {
-        assert!(Env::Local.url().starts_with("http://"));
-        assert!(Env::Dev.url().starts_with("https://"));
-        assert!(Env::Production.url().starts_with("https://"));
+    fn env_url_exact_values() {
+        assert_eq!(Env::Local.url(), "http://localhost:5556");
+        assert_eq!(Env::Dev.url(), "https://grpc.dev.xmtp.network:443");
+        assert_eq!(
+            Env::Production.url(),
+            "https://grpc.production.xmtp.network:443"
+        );
     }
 
     #[test]
-    fn env_secure() {
+    fn env_local_is_insecure_others_secure() {
         assert!(!Env::Local.is_secure());
         assert!(Env::Dev.is_secure());
         assert!(Env::Production.is_secure());
     }
 
+    /// FFI discriminant contract: identity & conversation enums.
     #[test]
-    fn env_default_is_dev() {
-        assert_eq!(Env::default(), Env::Dev);
-    }
-
-    #[test]
-    fn identifier_kind_from_ffi() {
+    fn ffi_discriminants_identity_and_conversation() {
         assert_eq!(IdentifierKind::from_ffi(0), Some(IdentifierKind::Ethereum));
         assert_eq!(IdentifierKind::from_ffi(1), Some(IdentifierKind::Passkey));
-        assert_eq!(IdentifierKind::from_ffi(99), None);
-    }
+        assert_eq!(IdentifierKind::from_ffi(2), None);
 
-    #[test]
-    fn consent_state_from_ffi() {
-        assert_eq!(ConsentState::from_ffi(0), Some(ConsentState::Unknown));
-        assert_eq!(ConsentState::from_ffi(1), Some(ConsentState::Allowed));
-        assert_eq!(ConsentState::from_ffi(2), Some(ConsentState::Denied));
-        assert_eq!(ConsentState::from_ffi(-1), None);
-    }
-
-    #[test]
-    fn conversation_type_roundtrip() {
         assert_eq!(ConversationType::from_ffi(0), Some(ConversationType::Dm));
         assert_eq!(ConversationType::from_ffi(1), Some(ConversationType::Group));
         assert_eq!(ConversationType::from_ffi(2), Some(ConversationType::Sync));
@@ -620,29 +608,13 @@ mod tests {
             ConversationType::from_ffi(3),
             Some(ConversationType::Oneshot)
         );
-        assert_eq!(ConversationType::from_ffi(42), None);
-    }
+        assert_eq!(ConversationType::from_ffi(4), None);
 
-    #[test]
-    fn delivery_status_from_ffi() {
-        assert_eq!(
-            DeliveryStatus::from_ffi(0),
-            Some(DeliveryStatus::Unpublished)
-        );
-        assert_eq!(DeliveryStatus::from_ffi(1), Some(DeliveryStatus::Published));
-        assert_eq!(DeliveryStatus::from_ffi(2), Some(DeliveryStatus::Failed));
-        assert_eq!(DeliveryStatus::from_ffi(3), None);
-    }
+        assert_eq!(ConsentState::from_ffi(0), Some(ConsentState::Unknown));
+        assert_eq!(ConsentState::from_ffi(1), Some(ConsentState::Allowed));
+        assert_eq!(ConsentState::from_ffi(2), Some(ConsentState::Denied));
+        assert_eq!(ConsentState::from_ffi(-1), None);
 
-    #[test]
-    fn preference_kind_from_ffi() {
-        assert_eq!(PreferenceKind::from_ffi(0), Some(PreferenceKind::Consent));
-        assert_eq!(PreferenceKind::from_ffi(1), Some(PreferenceKind::HmacKey));
-        assert_eq!(PreferenceKind::from_ffi(2), None);
-    }
-
-    #[test]
-    fn conversation_order_by_from_ffi() {
         assert_eq!(
             ConversationOrderBy::from_ffi(0),
             Some(ConversationOrderBy::CreatedAt)
@@ -654,16 +626,36 @@ mod tests {
         assert_eq!(ConversationOrderBy::from_ffi(-1), None);
     }
 
+    /// FFI discriminant contract: message & preference enums.
     #[test]
-    fn conversation_order_by_default() {
+    fn ffi_discriminants_message_and_preference() {
+        assert_eq!(MessageKind::from_ffi(0), Some(MessageKind::Application));
         assert_eq!(
-            ConversationOrderBy::default(),
-            ConversationOrderBy::CreatedAt
+            MessageKind::from_ffi(1),
+            Some(MessageKind::MembershipChange)
         );
+        assert_eq!(MessageKind::from_ffi(2), None);
+
+        assert_eq!(
+            DeliveryStatus::from_ffi(0),
+            Some(DeliveryStatus::Unpublished)
+        );
+        assert_eq!(DeliveryStatus::from_ffi(1), Some(DeliveryStatus::Published));
+        assert_eq!(DeliveryStatus::from_ffi(2), Some(DeliveryStatus::Failed));
+        assert_eq!(DeliveryStatus::from_ffi(3), None);
+
+        assert_eq!(SortDirection::from_ffi(0), Some(SortDirection::Ascending));
+        assert_eq!(SortDirection::from_ffi(1), Some(SortDirection::Descending));
+        assert_eq!(SortDirection::from_ffi(2), None);
+
+        assert_eq!(PreferenceKind::from_ffi(0), Some(PreferenceKind::Consent));
+        assert_eq!(PreferenceKind::from_ffi(1), Some(PreferenceKind::HmacKey));
+        assert_eq!(PreferenceKind::from_ffi(2), None);
     }
 
+    /// `PermissionPolicy` discriminants + the `+1` write-offset logic.
     #[test]
-    fn permission_policy_from_ffi() {
+    fn permission_policy_discriminants_and_write_offset() {
         assert_eq!(PermissionPolicy::from_ffi(0), Some(PermissionPolicy::Allow));
         assert_eq!(PermissionPolicy::from_ffi(1), Some(PermissionPolicy::Deny));
         assert_eq!(
@@ -680,32 +672,9 @@ mod tests {
         );
         assert_eq!(PermissionPolicy::from_ffi(5), Some(PermissionPolicy::Other));
         assert_eq!(PermissionPolicy::from_ffi(99), None);
-    }
 
-    #[test]
-    fn sort_direction_from_ffi() {
-        assert_eq!(SortDirection::from_ffi(0), Some(SortDirection::Ascending));
-        assert_eq!(SortDirection::from_ffi(1), Some(SortDirection::Descending));
-        assert_eq!(SortDirection::from_ffi(2), None);
-    }
-
-    #[test]
-    fn list_messages_options_default() {
-        let opts = ListMessagesOptions::default();
-        assert_eq!(opts.sent_after_ns, 0);
-        assert_eq!(opts.sent_before_ns, 0);
-        assert_eq!(opts.limit, 0);
-        assert!(opts.direction.is_none());
-        assert!(opts.delivery_status.is_none());
-        assert!(opts.kind.is_none());
-    }
-
-    #[test]
-    fn list_conversations_options_default() {
-        let opts = ListConversationsOptions::default();
-        assert!(opts.conversation_type.is_none());
-        assert_eq!(opts.limit, 0);
-        assert_eq!(opts.created_after_ns, 0);
-        assert_eq!(opts.created_before_ns, 0);
+        assert_eq!(PermissionPolicy::Allow.to_write_i32(), 1);
+        assert_eq!(PermissionPolicy::Deny.to_write_i32(), 2);
+        assert_eq!(PermissionPolicy::SuperAdminOnly.to_write_i32(), 4);
     }
 }

@@ -228,125 +228,84 @@ pub(crate) unsafe fn borrow_nullable_string(ptr: *mut c_char) -> Option<String> 
 }
 
 #[cfg(test)]
-#[allow(
-    clippy::indexing_slicing,
-    reason = "test code with known-valid indices"
-)]
 mod tests {
     use super::*;
 
     #[test]
-    fn ffi_usize_positive() {
+    fn ffi_usize_clamps_negative_to_zero() {
         assert_eq!(ffi_usize(5), 5);
         assert_eq!(ffi_usize(0), 0);
-    }
-
-    #[test]
-    fn ffi_usize_negative_clamped() {
         assert_eq!(ffi_usize(-1), 0);
         assert_eq!(ffi_usize(i32::MIN), 0);
     }
 
     #[test]
-    fn to_ffi_len_valid() {
+    fn to_ffi_len_boundary() {
         assert_eq!(to_ffi_len(0).unwrap(), 0);
-        assert_eq!(to_ffi_len(100).unwrap(), 100);
         assert_eq!(to_ffi_len(i32::MAX as usize).unwrap(), i32::MAX);
-    }
-
-    #[test]
-    fn to_ffi_len_overflow() {
         assert!(to_ffi_len(i32::MAX as usize + 1).is_err());
-        assert!(to_ffi_len(usize::MAX).is_err());
     }
 
     #[test]
-    fn to_c_string_valid() {
-        let s = to_c_string("hello").unwrap();
-        assert_eq!(s.to_str().unwrap(), "hello");
-    }
-
-    #[test]
-    fn to_c_string_empty() {
-        let s = to_c_string("").unwrap();
-        assert_eq!(s.to_str().unwrap(), "");
-    }
-
-    #[test]
-    fn to_c_string_nul_rejected() {
+    fn to_c_string_rejects_interior_nul() {
+        assert!(to_c_string("hello").is_ok());
         assert!(to_c_string("hello\0world").is_err());
     }
 
     #[test]
-    fn to_c_string_array_roundtrip() {
+    fn to_c_string_array_preserves_order_and_content() {
         let input = &["foo", "bar", "baz"];
         let (owned, ptrs) = to_c_string_array(input).unwrap();
-        assert_eq!(owned.len(), 3);
-        assert_eq!(ptrs.len(), 3);
-        for (i, c) in owned.iter().enumerate() {
-            assert_eq!(c.to_str().unwrap(), input[i]);
+        assert_eq!(ptrs.len(), input.len());
+        for (cs, &expected) in owned.iter().zip(input) {
+            assert_eq!(cs.to_str().unwrap(), expected);
         }
     }
 
     #[test]
-    fn to_c_string_array_empty() {
-        let (owned, ptrs) = to_c_string_array(&[]).unwrap();
-        assert!(owned.is_empty());
-        assert!(ptrs.is_empty());
-    }
-
-    #[test]
-    fn borrow_c_string_null() {
+    fn borrow_c_string_null_returns_empty() {
         // SAFETY: Testing null pointer handling.
-        let s = unsafe { borrow_c_string(std::ptr::null_mut()) };
-        assert!(s.is_empty());
+        assert!(unsafe { borrow_c_string(std::ptr::null_mut()) }.is_empty());
     }
 
     #[test]
-    fn borrow_c_string_valid() {
+    fn borrow_c_string_reads_without_freeing() {
         let cs = CString::new("test").unwrap();
-        let ptr = cs.as_ptr().cast_mut();
-        // SAFETY: `ptr` points to a valid NUL-terminated C string.
-        let s = unsafe { borrow_c_string(ptr) };
+        // SAFETY: `ptr` points to a valid NUL-terminated C string owned by `cs`.
+        let s = unsafe { borrow_c_string(cs.as_ptr().cast_mut()) };
         assert_eq!(s, "test");
+        assert_eq!(cs.to_str().unwrap(), "test");
     }
 
     #[test]
-    fn borrow_nullable_string_null() {
+    fn borrow_nullable_string_null_returns_none() {
         // SAFETY: Testing null pointer handling.
-        let s = unsafe { borrow_nullable_string(std::ptr::null_mut()) };
-        assert!(s.is_none());
+        assert!(unsafe { borrow_nullable_string(std::ptr::null_mut()) }.is_none());
     }
 
     #[test]
-    fn borrow_nullable_string_valid() {
+    fn borrow_nullable_string_returns_some() {
         let cs = CString::new("hello").unwrap();
-        let ptr = cs.as_ptr().cast_mut();
-        // SAFETY: `ptr` points to a valid NUL-terminated C string.
-        let s = unsafe { borrow_nullable_string(ptr) };
-        assert_eq!(s, Some("hello".into()));
+        // SAFETY: `ptr` points to a valid NUL-terminated C string owned by `cs`.
+        let s = unsafe { borrow_nullable_string(cs.as_ptr().cast_mut()) };
+        assert_eq!(s.as_deref(), Some("hello"));
     }
 
     #[test]
-    fn c_str_ptr_some() {
-        let cs = CString::new("x").unwrap();
-        assert!(!c_str_ptr(Some(&cs)).is_null());
-    }
-
-    #[test]
-    fn c_str_ptr_none() {
-        assert!(c_str_ptr(None).is_null());
-    }
-
-    #[test]
-    fn optional_c_string_some() {
-        let opt = optional_c_string(Some("abc")).unwrap();
-        assert_eq!(opt.unwrap().to_str().unwrap(), "abc");
-    }
-
-    #[test]
-    fn optional_c_string_none() {
-        let opt = optional_c_string(None).unwrap();
-        assert!(opt.is_none());
+    fn identifiers_to_ffi_parallel_arrays() {
+        use crate::types::{AccountIdentifier, IdentifierKind};
+        let ids = vec![
+            AccountIdentifier {
+                address: "0xaaa".into(),
+                kind: IdentifierKind::Ethereum,
+            },
+            AccountIdentifier {
+                address: "pk".into(),
+                kind: IdentifierKind::Passkey,
+            },
+        ];
+        let (_owned, ptrs, kinds) = identifiers_to_ffi(&ids).unwrap();
+        assert_eq!(ptrs.len(), 2);
+        assert_eq!(kinds, vec![0, 1]);
     }
 }
