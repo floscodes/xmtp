@@ -99,3 +99,92 @@ pub trait Resolver: Send + Sync {
         Ok(None)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_eth_address() {
+        let addr = "0x1234567890abcdef1234567890abcdef12345678";
+        assert_eq!(
+            Recipient::parse(addr),
+            Recipient::Address(addr.to_lowercase())
+        );
+    }
+
+    #[test]
+    fn parse_eth_address_uppercase() {
+        let addr = "0xABCDEF1234567890ABCDEF1234567890ABCDEF12";
+        assert_eq!(
+            Recipient::parse(addr),
+            Recipient::Address(addr.to_lowercase())
+        );
+    }
+
+    #[test]
+    fn parse_eth_address_trimmed() {
+        let addr = "  0x1234567890abcdef1234567890abcdef12345678  ";
+        assert_eq!(
+            Recipient::parse(addr),
+            Recipient::Address(addr.trim().to_lowercase())
+        );
+    }
+
+    #[test]
+    fn parse_ens_name() {
+        assert_eq!(
+            Recipient::parse("vitalik.eth"),
+            Recipient::Ens("vitalik.eth".into())
+        );
+    }
+
+    #[test]
+    fn parse_ens_subdomain() {
+        assert_eq!(
+            Recipient::parse("sub.name.eth"),
+            Recipient::Ens("sub.name.eth".into())
+        );
+    }
+
+    #[test]
+    fn parse_inbox_id() {
+        let id = "abc123deadbeef";
+        assert_eq!(Recipient::parse(id), Recipient::InboxId(id.into()));
+    }
+
+    #[test]
+    fn parse_short_hex_is_inbox_id() {
+        let short = "0x1234";
+        assert_eq!(Recipient::parse(short), Recipient::InboxId(short.into()));
+    }
+
+    #[test]
+    fn display_roundtrip() {
+        let addr = "0x1234567890abcdef1234567890abcdef12345678";
+        let r = Recipient::parse(addr);
+        assert_eq!(r.to_string(), addr.to_lowercase());
+    }
+
+    #[test]
+    fn from_str_trait() {
+        let r: Recipient = "vitalik.eth".into();
+        assert_eq!(r, Recipient::Ens("vitalik.eth".into()));
+    }
+
+    #[test]
+    fn from_string_trait() {
+        let r: Recipient = String::from("vitalik.eth").into();
+        assert_eq!(r, Recipient::Ens("vitalik.eth".into()));
+    }
+
+    #[test]
+    fn from_account_identifier() {
+        use crate::types::{AccountIdentifier, IdentifierKind};
+        let id = AccountIdentifier {
+            address: "0xabc".into(),
+            kind: IdentifierKind::Ethereum,
+        };
+        assert_eq!(Recipient::from(id), Recipient::Address("0xabc".into()));
+    }
+}

@@ -39,6 +39,10 @@ pub enum XmtpError {
     /// Identity resolution failed (ENS, Lens, etc.).
     #[error("resolution: {0}")]
     Resolution(String),
+
+    /// An I/O or filesystem operation failed.
+    #[error("io: {0}")]
+    Io(String),
 }
 
 /// Read the last FFI error message from thread-local storage.

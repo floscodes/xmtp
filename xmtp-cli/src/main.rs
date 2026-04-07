@@ -190,12 +190,12 @@ fn run_tui(name: &str, cfg: &config::ProfileConfig) -> xmtp::Result<()> {
     let mut app = App::new(cfg.address.clone(), inbox_id, env_name, cmd_tx);
 
     tui::install_panic_hook();
-    let mut terminal = tui::init().map_err(|e| xmtp::XmtpError::Ffi(format!("terminal: {e}")))?;
+    let mut terminal = tui::init().map_err(|e| xmtp::XmtpError::Io(format!("terminal: {e}")))?;
 
     while !app.quit {
         terminal
             .draw(|f| ui::render(&mut app, f))
-            .map_err(|e| xmtp::XmtpError::Ffi(format!("render: {e}")))?;
+            .map_err(|e| xmtp::XmtpError::Io(format!("render: {e}")))?;
 
         match event_rx.recv() {
             Ok(Event::Key(k)) => app.handle_key(k),
@@ -206,5 +206,5 @@ fn run_tui(name: &str, cfg: &config::ProfileConfig) -> xmtp::Result<()> {
         }
     }
 
-    tui::restore().map_err(|e| xmtp::XmtpError::Ffi(format!("restore: {e}")))
+    tui::restore().map_err(|e| xmtp::XmtpError::Io(format!("restore: {e}")))
 }

@@ -5740,6 +5740,7 @@ dependencies = [
  "clap",
  "dirs",
  "getrandom 0.4.2",
+ "hex",
  "ratatui",
  "serde_json",
  "tokio",

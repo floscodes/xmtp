@@ -26,8 +26,8 @@ pub(crate) fn default_profile() -> String {
 /// Persist the default profile name.
 pub(crate) fn set_default(name: &str) -> xmtp::Result<()> {
     let base = data_dir();
-    fs::create_dir_all(&base).map_err(|e| xmtp::XmtpError::Ffi(format!("mkdir: {e}")))?;
-    fs::write(base.join(".default"), name).map_err(|e| xmtp::XmtpError::Ffi(format!("write: {e}")))
+    fs::create_dir_all(&base).map_err(|e| xmtp::XmtpError::Io(format!("mkdir: {e}")))?;
+    fs::write(base.join(".default"), name).map_err(|e| xmtp::XmtpError::Io(format!("write: {e}")))
 }
 
 /// How a profile signs messages.
@@ -63,7 +63,7 @@ impl ProfileConfig {
     pub(crate) fn load(profile: &str) -> xmtp::Result<Self> {
         let path = profile_dir(profile).join("profile.conf");
         let text = fs::read_to_string(&path)
-            .map_err(|e| xmtp::XmtpError::Ffi(format!("load config: {e}")))?;
+            .map_err(|e| xmtp::XmtpError::Io(format!("load config: {e}")))?;
 
         let mut env = Env::Dev;
         let mut rpc_url = String::from("https://eth.llamarpc.com");
@@ -94,7 +94,7 @@ impl ProfileConfig {
     /// Save to `<profile_dir>/profile.conf`.
     pub(crate) fn save(&self, profile: &str) -> xmtp::Result<()> {
         let dir = profile_dir(profile);
-        fs::create_dir_all(&dir).map_err(|e| xmtp::XmtpError::Ffi(format!("mkdir: {e}")))?;
+        fs::create_dir_all(&dir).map_err(|e| xmtp::XmtpError::Io(format!("mkdir: {e}")))?;
         let content = format!(
             "env={}\nrpc_url={}\nsigner={}\naddress={}\n",
             env_name(self.env),
@@ -103,7 +103,7 @@ impl ProfileConfig {
             self.address,
         );
         fs::write(dir.join("profile.conf"), content)
-            .map_err(|e| xmtp::XmtpError::Ffi(format!("write config: {e}")))
+            .map_err(|e| xmtp::XmtpError::Io(format!("write config: {e}")))
     }
 }
 
@@ -137,7 +137,7 @@ pub(crate) fn open_with_signer(
     let signer: Box<dyn Signer> = match cfg.signer {
         SignerKind::File => {
             let bytes = fs::read(dir.join("identity.key"))
-                .map_err(|e| xmtp::XmtpError::Ffi(format!("read key: {e}")))?;
+                .map_err(|e| xmtp::XmtpError::Io(format!("read key: {e}")))?;
             let key: [u8; 32] = bytes
                 .try_into()
                 .map_err(|_| xmtp::XmtpError::InvalidArgument("key must be 32 bytes".into()))?;

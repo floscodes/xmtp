@@ -236,7 +236,7 @@ impl Worker {
             return;
         };
         let opts = SendOptions { should_push: push };
-        match conv.send_text_optimistic_with(text, &opts) {
+        match conv.send_text_optimistic_with(text, opts) {
             Ok(_) => {
                 self.send_msgs(&id, &conv);
                 if let Err(e) = conv.publish_messages() {

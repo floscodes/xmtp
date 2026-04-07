@@ -16,7 +16,7 @@ use crate::client::Client;
 use crate::conversation::Conversation;
 use crate::error::{self, Result};
 use crate::ffi::{OwnedHandle, to_ffi_len};
-use crate::types::{ConsentEntityType, ConsentState, ConversationType};
+use crate::types::{ConsentEntityType, ConsentState, ConversationType, PreferenceKind};
 
 /// A real-time event subscription backed by an internal channel.
 ///
@@ -102,8 +102,8 @@ pub struct ConsentUpdate {
 /// A user preference update event.
 #[derive(Debug, Clone)]
 pub struct PreferenceUpdate {
-    /// The kind of preference change (0 = Consent, 1 = `HmacKey`).
-    pub kind: i32,
+    /// The kind of preference change.
+    pub kind: PreferenceKind,
     /// For Consent updates: the consent change details.
     pub consent: Option<ConsentUpdate>,
 }
@@ -370,9 +370,9 @@ unsafe extern "C" fn pref_trampoline(
     let slice = unsafe { std::slice::from_raw_parts(updates, count.unsigned_abs() as usize) };
     let items: Vec<PreferenceUpdate> = slice
         .iter()
-        .map(|u| {
-            let kind = u.kind as i32;
-            let consent = if kind == 0 {
+        .filter_map(|u| {
+            let kind = PreferenceKind::from_ffi(u.kind as i32)?;
+            let consent = if kind == PreferenceKind::Consent {
                 let r = &u.consent;
                 let et = ConsentEntityType::from_ffi(r.entity_type as i32);
                 let st = ConsentState::from_ffi(r.state as i32);
@@ -393,7 +393,7 @@ unsafe extern "C" fn pref_trampoline(
             } else {
                 None
             };
-            PreferenceUpdate { kind, consent }
+            Some(PreferenceUpdate { kind, consent })
         })
         .collect();
     if !items.is_empty() {

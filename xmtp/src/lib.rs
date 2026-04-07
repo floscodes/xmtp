@@ -61,5 +61,5 @@ pub use types::{
     HmacKey, HmacKeyEntry, IdentifierKind, IdentityStats, InboxState, KeyPackageStatus,
     LastReadTime, ListConversationsOptions, ListMessagesOptions, MembershipState, MessageKind,
     MetadataField, PermissionLevel, PermissionPolicy, PermissionPolicySet, PermissionUpdateType,
-    Permissions, SendOptions, Signer, SortDirection, SyncResult,
+    Permissions, PreferenceKind, SendOptions, Signer, SortDirection, SyncResult,
 };

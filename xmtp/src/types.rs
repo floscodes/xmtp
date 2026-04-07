@@ -212,6 +212,16 @@ ffi_enum! {
     }
 }
 
+ffi_enum! {
+    /// Kind of preference update from a preference stream.
+    pub enum PreferenceKind {
+        /// Consent preference change.
+        Consent = 0,
+        /// HMAC key update.
+        HmacKey = 1,
+    }
+}
+
 /// Metadata field names for [`PermissionUpdateType::UpdateMetadata`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum MetadataField {
@@ -295,13 +305,26 @@ pub struct ListMessagesOptions {
 }
 
 /// Sort order for listing conversations.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+#[repr(i32)]
 pub enum ConversationOrderBy {
     /// Order by creation timestamp (default).
     #[default]
     CreatedAt = 0,
     /// Order by last activity timestamp.
     LastActivity = 1,
+}
+
+impl ConversationOrderBy {
+    /// Convert from an FFI `i32` value. Returns `None` for unknown values.
+    #[must_use]
+    pub const fn from_ffi(value: i32) -> Option<Self> {
+        match value {
+            0 => Some(Self::CreatedAt),
+            1 => Some(Self::LastActivity),
+            _ => None,
+        }
+    }
 }
 
 /// Options for listing conversations.
@@ -547,5 +570,142 @@ pub trait Signer: Send + Sync {
     /// Block number for SCW verification. 0 = latest.
     fn block_number(&self) -> u64 {
         0
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn env_urls() {
+        assert!(Env::Local.url().starts_with("http://"));
+        assert!(Env::Dev.url().starts_with("https://"));
+        assert!(Env::Production.url().starts_with("https://"));
+    }
+
+    #[test]
+    fn env_secure() {
+        assert!(!Env::Local.is_secure());
+        assert!(Env::Dev.is_secure());
+        assert!(Env::Production.is_secure());
+    }
+
+    #[test]
+    fn env_default_is_dev() {
+        assert_eq!(Env::default(), Env::Dev);
+    }
+
+    #[test]
+    fn identifier_kind_from_ffi() {
+        assert_eq!(IdentifierKind::from_ffi(0), Some(IdentifierKind::Ethereum));
+        assert_eq!(IdentifierKind::from_ffi(1), Some(IdentifierKind::Passkey));
+        assert_eq!(IdentifierKind::from_ffi(99), None);
+    }
+
+    #[test]
+    fn consent_state_from_ffi() {
+        assert_eq!(ConsentState::from_ffi(0), Some(ConsentState::Unknown));
+        assert_eq!(ConsentState::from_ffi(1), Some(ConsentState::Allowed));
+        assert_eq!(ConsentState::from_ffi(2), Some(ConsentState::Denied));
+        assert_eq!(ConsentState::from_ffi(-1), None);
+    }
+
+    #[test]
+    fn conversation_type_roundtrip() {
+        assert_eq!(ConversationType::from_ffi(0), Some(ConversationType::Dm));
+        assert_eq!(ConversationType::from_ffi(1), Some(ConversationType::Group));
+        assert_eq!(ConversationType::from_ffi(2), Some(ConversationType::Sync));
+        assert_eq!(
+            ConversationType::from_ffi(3),
+            Some(ConversationType::Oneshot)
+        );
+        assert_eq!(ConversationType::from_ffi(42), None);
+    }
+
+    #[test]
+    fn delivery_status_from_ffi() {
+        assert_eq!(
+            DeliveryStatus::from_ffi(0),
+            Some(DeliveryStatus::Unpublished)
+        );
+        assert_eq!(DeliveryStatus::from_ffi(1), Some(DeliveryStatus::Published));
+        assert_eq!(DeliveryStatus::from_ffi(2), Some(DeliveryStatus::Failed));
+        assert_eq!(DeliveryStatus::from_ffi(3), None);
+    }
+
+    #[test]
+    fn preference_kind_from_ffi() {
+        assert_eq!(PreferenceKind::from_ffi(0), Some(PreferenceKind::Consent));
+        assert_eq!(PreferenceKind::from_ffi(1), Some(PreferenceKind::HmacKey));
+        assert_eq!(PreferenceKind::from_ffi(2), None);
+    }
+
+    #[test]
+    fn conversation_order_by_from_ffi() {
+        assert_eq!(
+            ConversationOrderBy::from_ffi(0),
+            Some(ConversationOrderBy::CreatedAt)
+        );
+        assert_eq!(
+            ConversationOrderBy::from_ffi(1),
+            Some(ConversationOrderBy::LastActivity)
+        );
+        assert_eq!(ConversationOrderBy::from_ffi(-1), None);
+    }
+
+    #[test]
+    fn conversation_order_by_default() {
+        assert_eq!(
+            ConversationOrderBy::default(),
+            ConversationOrderBy::CreatedAt
+        );
+    }
+
+    #[test]
+    fn permission_policy_from_ffi() {
+        assert_eq!(PermissionPolicy::from_ffi(0), Some(PermissionPolicy::Allow));
+        assert_eq!(PermissionPolicy::from_ffi(1), Some(PermissionPolicy::Deny));
+        assert_eq!(
+            PermissionPolicy::from_ffi(2),
+            Some(PermissionPolicy::AdminOnly)
+        );
+        assert_eq!(
+            PermissionPolicy::from_ffi(3),
+            Some(PermissionPolicy::SuperAdminOnly)
+        );
+        assert_eq!(
+            PermissionPolicy::from_ffi(4),
+            Some(PermissionPolicy::DoesNotExist)
+        );
+        assert_eq!(PermissionPolicy::from_ffi(5), Some(PermissionPolicy::Other));
+        assert_eq!(PermissionPolicy::from_ffi(99), None);
+    }
+
+    #[test]
+    fn sort_direction_from_ffi() {
+        assert_eq!(SortDirection::from_ffi(0), Some(SortDirection::Ascending));
+        assert_eq!(SortDirection::from_ffi(1), Some(SortDirection::Descending));
+        assert_eq!(SortDirection::from_ffi(2), None);
+    }
+
+    #[test]
+    fn list_messages_options_default() {
+        let opts = ListMessagesOptions::default();
+        assert_eq!(opts.sent_after_ns, 0);
+        assert_eq!(opts.sent_before_ns, 0);
+        assert_eq!(opts.limit, 0);
+        assert!(opts.direction.is_none());
+        assert!(opts.delivery_status.is_none());
+        assert!(opts.kind.is_none());
+    }
+
+    #[test]
+    fn list_conversations_options_default() {
+        let opts = ListConversationsOptions::default();
+        assert!(opts.conversation_type.is_none());
+        assert_eq!(opts.limit, 0);
+        assert_eq!(opts.created_after_ns, 0);
+        assert_eq!(opts.created_before_ns, 0);
     }
 }

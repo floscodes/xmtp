@@ -195,7 +195,7 @@ pub(crate) fn send(
     })?;
 
     let opts = SendOptions { should_push: push };
-    let msg_id = conv.send_text_with(text, &opts)?;
+    let msg_id = conv.send_text_with(text, opts)?;
 
     if json {
         emit(&json!({"ok": true, "message_id": msg_id, "conversation_id": conv_id}));

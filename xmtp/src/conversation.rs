@@ -10,8 +10,9 @@ use std::ptr;
 
 use crate::error::{self, Result};
 use crate::ffi::{
-    FfiList, OwnedHandle, ffi_usize, identifiers_to_ffi, read_borrowed_strings, take_c_string,
-    take_nullable_string, to_c_string, to_c_string_array, to_ffi_len,
+    FfiList, OwnedHandle, borrow_c_string, borrow_nullable_string, ffi_usize, identifiers_to_ffi,
+    read_borrowed_strings, take_c_string, take_nullable_string, to_c_string, to_c_string_array,
+    to_ffi_len,
 };
 use crate::types::{
     AccountIdentifier, ConsentState, ConversationDebugInfo, ConversationMetadata, ConversationType,
@@ -20,6 +21,15 @@ use crate::types::{
     PermissionLevel, PermissionPolicy, PermissionPolicySet, PermissionUpdateType, Permissions,
     SendOptions, SortDirection,
 };
+
+/// Action for updating the admin list via FFI.
+#[repr(i32)]
+enum AdminAction {
+    Add = 0,
+    Remove = 1,
+    AddSuper = 2,
+    RemoveSuper = 3,
+}
 
 /// Generate a nullable-string getter method on `Conversation`.
 macro_rules! metadata_getter {
@@ -505,30 +515,34 @@ impl Conversation {
 
     /// Add an admin.
     pub fn add_admin(&self, inbox_id: &str) -> Result<()> {
-        self.update_admin_list(inbox_id, 0)
+        self.update_admin_list(inbox_id, AdminAction::Add)
     }
 
     /// Remove an admin.
     pub fn remove_admin(&self, inbox_id: &str) -> Result<()> {
-        self.update_admin_list(inbox_id, 1)
+        self.update_admin_list(inbox_id, AdminAction::Remove)
     }
 
     /// Add a super admin.
     pub fn add_super_admin(&self, inbox_id: &str) -> Result<()> {
-        self.update_admin_list(inbox_id, 2)
+        self.update_admin_list(inbox_id, AdminAction::AddSuper)
     }
 
     /// Remove a super admin.
     pub fn remove_super_admin(&self, inbox_id: &str) -> Result<()> {
-        self.update_admin_list(inbox_id, 3)
+        self.update_admin_list(inbox_id, AdminAction::RemoveSuper)
     }
 
     /// Low-level admin list update.
-    fn update_admin_list(&self, inbox_id: &str, action: i32) -> Result<()> {
+    fn update_admin_list(&self, inbox_id: &str, action: AdminAction) -> Result<()> {
         let c = to_c_string(inbox_id)?;
         // SAFETY: Valid handle, CString, and action code.
         error::check(unsafe {
-            xmtp_sys::xmtp_conversation_update_admin_list(self.handle.as_ptr(), c.as_ptr(), action)
+            xmtp_sys::xmtp_conversation_update_admin_list(
+                self.handle.as_ptr(),
+                c.as_ptr(),
+                action as i32,
+            )
         })
     }
 
@@ -669,22 +683,22 @@ pub(crate) fn read_enriched_message_list(
         };
         msgs.push(Message {
             // SAFETY: Borrowed C string field in the FFI struct.
-            id: unsafe { c_str_to_string(m.id) },
+            id: unsafe { borrow_c_string(m.id) },
             // SAFETY: Borrowed C string field in the FFI struct.
-            conversation_id: unsafe { c_str_to_string(m.group_id) },
+            conversation_id: unsafe { borrow_c_string(m.group_id) },
             // SAFETY: Borrowed C string field in the FFI struct.
-            sender_inbox_id: unsafe { c_str_to_string(m.sender_inbox_id) },
+            sender_inbox_id: unsafe { borrow_c_string(m.sender_inbox_id) },
             // SAFETY: Borrowed C string field in the FFI struct.
-            sender_installation_id: unsafe { c_str_to_string(m.sender_installation_id) },
+            sender_installation_id: unsafe { borrow_c_string(m.sender_installation_id) },
             sent_at_ns: m.sent_at_ns,
             inserted_at_ns: m.inserted_at_ns,
             kind: MessageKind::from_ffi(m.kind as i32).unwrap_or(MessageKind::Application),
             delivery_status: DeliveryStatus::from_ffi(m.delivery_status as i32)
                 .unwrap_or(DeliveryStatus::Unpublished),
             // SAFETY: Nullable borrowed C string field.
-            content_type: unsafe { nullable_c_str(m.content_type) },
+            content_type: unsafe { borrow_nullable_string(m.content_type) },
             // SAFETY: Nullable borrowed C string field.
-            fallback: unsafe { nullable_c_str(m.fallback_text) },
+            fallback: unsafe { borrow_nullable_string(m.fallback_text) },
             content,
             expires_at_ns: m.expires_at_ns,
             num_reactions: m.num_reactions,
@@ -808,16 +822,16 @@ fn read_debug_info(d: &xmtp_sys::XmtpFfiConversationDebugInfo) -> ConversationDe
         epoch: d.epoch,
         maybe_forked: d.maybe_forked != 0,
         // SAFETY: Nullable borrowed C string fields in the FFI struct.
-        fork_details: unsafe { nullable_c_str(d.fork_details) },
+        fork_details: unsafe { borrow_nullable_string(d.fork_details) },
         is_commit_log_forked: match d.is_commit_log_forked {
             0 => Some(false),
             1 => Some(true),
             _ => None,
         },
         // SAFETY: Nullable borrowed C string field.
-        local_commit_log: unsafe { nullable_c_str(d.local_commit_log) },
+        local_commit_log: unsafe { borrow_nullable_string(d.local_commit_log) },
         // SAFETY: Nullable borrowed C string field.
-        remote_commit_log: unsafe { nullable_c_str(d.remote_commit_log) },
+        remote_commit_log: unsafe { borrow_nullable_string(d.remote_commit_log) },
         cursors,
     }
 }
@@ -840,7 +854,7 @@ fn read_last_read_times(ptr: *mut xmtp_sys::XmtpFfiLastReadTimeList) -> Vec<Last
         let entry = unsafe { &*p };
         result.push(LastReadTime {
             // SAFETY: Borrowed C string field in the FFI struct.
-            inbox_id: unsafe { c_str_to_string(entry.inbox_id) },
+            inbox_id: unsafe { borrow_c_string(entry.inbox_id) },
             timestamp_ns: entry.timestamp_ns,
         });
     }
@@ -899,32 +913,4 @@ fn read_hmac_keys_inner(keys_ptr: *const xmtp_sys::XmtpFfiHmacKey, key_count: i3
             }
         })
         .collect()
-}
-
-/// Read a borrowed (non-owned) C string pointer. Returns empty string if null.
-unsafe fn c_str_to_string(ptr: *mut c_char) -> String {
-    if ptr.is_null() {
-        String::new()
-    } else {
-        // SAFETY: `ptr` is non-null and points to a valid NUL-terminated C string.
-        unsafe { CStr::from_ptr(ptr) }
-            .to_str()
-            .unwrap_or_default()
-            .to_owned()
-    }
-}
-
-/// Read a nullable borrowed C string pointer. Returns `None` if null.
-unsafe fn nullable_c_str(ptr: *mut c_char) -> Option<String> {
-    if ptr.is_null() {
-        None
-    } else {
-        Some(
-            // SAFETY: `ptr` is non-null and points to a valid NUL-terminated C string.
-            unsafe { CStr::from_ptr(ptr) }
-                .to_str()
-                .unwrap_or_default()
-                .to_owned(),
-        )
-    }
 }

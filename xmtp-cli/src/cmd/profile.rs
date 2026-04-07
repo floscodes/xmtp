@@ -21,7 +21,7 @@ pub(crate) fn create(args: &NewArgs) -> xmtp::Result<(ProfileConfig, Client)> {
         )));
     }
 
-    fs::create_dir_all(&dir).map_err(|e| xmtp::XmtpError::Ffi(format!("mkdir: {e}")))?;
+    fs::create_dir_all(&dir).map_err(|e| xmtp::XmtpError::Io(format!("mkdir: {e}")))?;
 
     let key_path = dir.join("identity.key");
     let db_path = dir.join("messages.db3");
@@ -36,14 +36,14 @@ pub(crate) fn create(args: &NewArgs) -> xmtp::Result<(ProfileConfig, Client)> {
         if let Some(ref hex) = args.import {
             import_hex_key(hex, &key_path)?;
         } else if let Some(ref src) = args.key {
-            fs::copy(src, &key_path).map_err(|e| xmtp::XmtpError::Ffi(format!("copy key: {e}")))?;
+            fs::copy(src, &key_path).map_err(|e| xmtp::XmtpError::Io(format!("copy key: {e}")))?;
         }
         (SignerKind::File, Box::new(load_or_create_key(&key_path)?))
     };
 
     // Copy database if provided.
     if let Some(ref src) = args.db {
-        fs::copy(src, &db_path).map_err(|e| xmtp::XmtpError::Ffi(format!("copy db: {e}")))?;
+        fs::copy(src, &db_path).map_err(|e| xmtp::XmtpError::Io(format!("copy db: {e}")))?;
     }
 
     // Register with the XMTP network.
@@ -87,7 +87,7 @@ pub(crate) fn list(json: bool) -> xmtp::Result<()> {
     let default = config::default_profile();
 
     let mut entries: Vec<_> = fs::read_dir(&base)
-        .map_err(|e| xmtp::XmtpError::Ffi(format!("read dir: {e}")))?
+        .map_err(|e| xmtp::XmtpError::Io(format!("read dir: {e}")))?
         .filter_map(Result::ok)
         .filter(|e| e.path().is_dir())
         .collect();
@@ -155,7 +155,7 @@ pub(crate) fn remove(name: &str) -> xmtp::Result<()> {
         println!("Profile '{name}' does not exist.");
         return Ok(());
     }
-    fs::remove_dir_all(&dir).map_err(|e| xmtp::XmtpError::Ffi(format!("remove: {e}")))?;
+    fs::remove_dir_all(&dir).map_err(|e| xmtp::XmtpError::Io(format!("remove: {e}")))?;
     println!("Removed profile '{name}'.");
     Ok(())
 }
@@ -175,14 +175,14 @@ pub(crate) fn clear() -> xmtp::Result<()> {
     let mut answer = String::new();
     io::stdin()
         .read_line(&mut answer)
-        .map_err(|e| xmtp::XmtpError::Ffi(format!("stdin: {e}")))?;
+        .map_err(|e| xmtp::XmtpError::Io(format!("stdin: {e}")))?;
 
     if !matches!(answer.trim(), "y" | "Y" | "yes" | "YES") {
         println!("Aborted.");
         return Ok(());
     }
 
-    fs::remove_dir_all(&base).map_err(|e| xmtp::XmtpError::Ffi(format!("clear: {e}")))?;
+    fs::remove_dir_all(&base).map_err(|e| xmtp::XmtpError::Io(format!("clear: {e}")))?;
     println!("All profiles deleted.");
     Ok(())
 }
@@ -215,31 +215,28 @@ pub(crate) fn default(name: Option<&str>, json: bool) -> xmtp::Result<()> {
 /// Decode a hex string and write as identity.key.
 fn import_hex_key(hex_str: &str, path: &std::path::Path) -> xmtp::Result<()> {
     let hex_str = hex_str.strip_prefix("0x").unwrap_or(hex_str);
-    if hex_str.len() != 64 {
+    let bytes = hex::decode(hex_str)
+        .map_err(|e| xmtp::XmtpError::InvalidArgument(format!("invalid hex: {e}")))?;
+    if bytes.len() != 32 {
         return Err(xmtp::XmtpError::InvalidArgument(format!(
-            "key must be 64 hex chars (32 bytes), got {}",
-            hex_str.len()
+            "key must be 32 bytes, got {}",
+            bytes.len()
         )));
     }
-    let bytes: Vec<u8> = (0..hex_str.len())
-        .step_by(2)
-        .map(|i| u8::from_str_radix(&hex_str[i..i + 2], 16))
-        .collect::<Result<_, _>>()
-        .map_err(|e| xmtp::XmtpError::InvalidArgument(format!("invalid hex: {e}")))?;
-    fs::write(path, &bytes).map_err(|e| xmtp::XmtpError::Ffi(format!("write key: {e}")))
+    fs::write(path, &bytes).map_err(|e| xmtp::XmtpError::Io(format!("write key: {e}")))
 }
 
 /// Load an existing key file or generate a new random key.
 fn load_or_create_key(path: &std::path::Path) -> xmtp::Result<AlloySigner> {
     let key: [u8; 32] = if path.exists() {
-        let bytes = fs::read(path).map_err(|e| xmtp::XmtpError::Ffi(format!("read key: {e}")))?;
+        let bytes = fs::read(path).map_err(|e| xmtp::XmtpError::Io(format!("read key: {e}")))?;
         bytes
             .try_into()
             .map_err(|_| xmtp::XmtpError::InvalidArgument("key file must be 32 bytes".into()))?
     } else {
         let mut key = [0u8; 32];
-        getrandom::fill(&mut key).map_err(|e| xmtp::XmtpError::Ffi(format!("rng: {e}")))?;
-        fs::write(path, key).map_err(|e| xmtp::XmtpError::Ffi(format!("write key: {e}")))?;
+        getrandom::fill(&mut key).map_err(|e| xmtp::XmtpError::Io(format!("rng: {e}")))?;
+        fs::write(path, key).map_err(|e| xmtp::XmtpError::Io(format!("write key: {e}")))?;
         key
     };
     AlloySigner::from_bytes(&key)

@@ -192,3 +192,161 @@ pub(crate) fn ffi_usize(raw: i32) -> usize {
 pub(crate) fn to_ffi_len(len: usize) -> Result<i32> {
     i32::try_from(len).map_err(|_| XmtpError::InvalidArgument("length exceeds i32::MAX".into()))
 }
+
+/// Read a **borrowed** (non-owned) C string pointer. Returns empty string if null.
+///
+/// Unlike [`take_c_string`], this does **not** free the pointer.
+#[allow(dead_code, reason = "used by conversation.rs which re-imports it")]
+pub(crate) unsafe fn borrow_c_string(ptr: *mut c_char) -> String {
+    if ptr.is_null() {
+        String::new()
+    } else {
+        // SAFETY: `ptr` is non-null and points to a valid NUL-terminated C string.
+        unsafe { CStr::from_ptr(ptr) }
+            .to_str()
+            .unwrap_or_default()
+            .to_owned()
+    }
+}
+
+/// Read a **borrowed** nullable C string pointer. Returns `None` if null.
+///
+/// Unlike [`take_nullable_string`], this does **not** free the pointer.
+#[allow(dead_code, reason = "used by conversation.rs which re-imports it")]
+pub(crate) unsafe fn borrow_nullable_string(ptr: *mut c_char) -> Option<String> {
+    if ptr.is_null() {
+        None
+    } else {
+        Some(
+            // SAFETY: `ptr` is non-null and points to a valid NUL-terminated C string.
+            unsafe { CStr::from_ptr(ptr) }
+                .to_str()
+                .unwrap_or_default()
+                .to_owned(),
+        )
+    }
+}
+
+#[cfg(test)]
+#[allow(
+    clippy::indexing_slicing,
+    reason = "test code with known-valid indices"
+)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ffi_usize_positive() {
+        assert_eq!(ffi_usize(5), 5);
+        assert_eq!(ffi_usize(0), 0);
+    }
+
+    #[test]
+    fn ffi_usize_negative_clamped() {
+        assert_eq!(ffi_usize(-1), 0);
+        assert_eq!(ffi_usize(i32::MIN), 0);
+    }
+
+    #[test]
+    fn to_ffi_len_valid() {
+        assert_eq!(to_ffi_len(0).unwrap(), 0);
+        assert_eq!(to_ffi_len(100).unwrap(), 100);
+        assert_eq!(to_ffi_len(i32::MAX as usize).unwrap(), i32::MAX);
+    }
+
+    #[test]
+    fn to_ffi_len_overflow() {
+        assert!(to_ffi_len(i32::MAX as usize + 1).is_err());
+        assert!(to_ffi_len(usize::MAX).is_err());
+    }
+
+    #[test]
+    fn to_c_string_valid() {
+        let s = to_c_string("hello").unwrap();
+        assert_eq!(s.to_str().unwrap(), "hello");
+    }
+
+    #[test]
+    fn to_c_string_empty() {
+        let s = to_c_string("").unwrap();
+        assert_eq!(s.to_str().unwrap(), "");
+    }
+
+    #[test]
+    fn to_c_string_nul_rejected() {
+        assert!(to_c_string("hello\0world").is_err());
+    }
+
+    #[test]
+    fn to_c_string_array_roundtrip() {
+        let input = &["foo", "bar", "baz"];
+        let (owned, ptrs) = to_c_string_array(input).unwrap();
+        assert_eq!(owned.len(), 3);
+        assert_eq!(ptrs.len(), 3);
+        for (i, c) in owned.iter().enumerate() {
+            assert_eq!(c.to_str().unwrap(), input[i]);
+        }
+    }
+
+    #[test]
+    fn to_c_string_array_empty() {
+        let (owned, ptrs) = to_c_string_array(&[]).unwrap();
+        assert!(owned.is_empty());
+        assert!(ptrs.is_empty());
+    }
+
+    #[test]
+    fn borrow_c_string_null() {
+        // SAFETY: Testing null pointer handling.
+        let s = unsafe { borrow_c_string(std::ptr::null_mut()) };
+        assert!(s.is_empty());
+    }
+
+    #[test]
+    fn borrow_c_string_valid() {
+        let cs = CString::new("test").unwrap();
+        let ptr = cs.as_ptr().cast_mut();
+        // SAFETY: `ptr` points to a valid NUL-terminated C string.
+        let s = unsafe { borrow_c_string(ptr) };
+        assert_eq!(s, "test");
+    }
+
+    #[test]
+    fn borrow_nullable_string_null() {
+        // SAFETY: Testing null pointer handling.
+        let s = unsafe { borrow_nullable_string(std::ptr::null_mut()) };
+        assert!(s.is_none());
+    }
+
+    #[test]
+    fn borrow_nullable_string_valid() {
+        let cs = CString::new("hello").unwrap();
+        let ptr = cs.as_ptr().cast_mut();
+        // SAFETY: `ptr` points to a valid NUL-terminated C string.
+        let s = unsafe { borrow_nullable_string(ptr) };
+        assert_eq!(s, Some("hello".into()));
+    }
+
+    #[test]
+    fn c_str_ptr_some() {
+        let cs = CString::new("x").unwrap();
+        assert!(!c_str_ptr(Some(&cs)).is_null());
+    }
+
+    #[test]
+    fn c_str_ptr_none() {
+        assert!(c_str_ptr(None).is_null());
+    }
+
+    #[test]
+    fn optional_c_string_some() {
+        let opt = optional_c_string(Some("abc")).unwrap();
+        assert_eq!(opt.unwrap().to_str().unwrap(), "abc");
+    }
+
+    #[test]
+    fn optional_c_string_none() {
+        let opt = optional_c_string(None).unwrap();
+        assert!(opt.is_none());
+    }
+}

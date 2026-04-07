@@ -604,8 +604,8 @@ impl Conversation {
     }
 
     /// Send a plain text message with options.
-    pub fn send_text_with(&self, text: &str, opts: &SendOptions) -> Result<String> {
-        self.send_with(&encode_text(text), opts)
+    pub fn send_text_with(&self, text: &str, opts: SendOptions) -> Result<String> {
+        self.send_with(&encode_text(text), &opts)
     }
 
     /// Send a markdown message.
@@ -654,8 +654,8 @@ impl Conversation {
     }
 
     /// Optimistically send a plain text message with options.
-    pub fn send_text_optimistic_with(&self, text: &str, opts: &SendOptions) -> Result<String> {
-        self.send_optimistic_with(&encode_text(text), opts)
+    pub fn send_text_optimistic_with(&self, text: &str, opts: SendOptions) -> Result<String> {
+        self.send_optimistic_with(&encode_text(text), &opts)
     }
 
     /// Optimistically send a markdown message.
